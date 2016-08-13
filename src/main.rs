@@ -1,8 +1,16 @@
 ///Acid testing program
 use std::process::Command;
 use std::thread;
+use std::time::Instant;
 
 fn main() {
+    println!("Trying to stop kernel...");
+
+    let start = Instant::now();
+    while start.elapsed().as_secs() == 0 {}
+
+    println!("Kernel preempted!");
+
     println!("Trying to kill kernel...");
 
     let mut threads = Vec::new();
@@ -35,5 +43,5 @@ fn main() {
         thread.join().unwrap();
     }
 
-    println!("Kernel survived!");
+    println!("Kernel survived thread test!");
 }
