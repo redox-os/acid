@@ -1,9 +1,42 @@
 ///Acid testing program
-use std::process::Command;
-use std::thread;
-use std::time::Instant;
 
-fn main() {
+extern crate x86;
+
+fn switch_test() -> Result<(), String> {
+    use std::thread;
+    use std::time::Instant;
+    use x86::time::rdtscp;
+
+    let switch_thread = thread::spawn(|| {
+        for i in 0..100 {
+            let time = Instant::now();
+            let tsc = unsafe { rdtscp() };
+            thread::yield_now();
+            let dtsc = unsafe { rdtscp() } - tsc;
+            let dtime = time.elapsed();
+            print!("{}", format!("C: {}: {} ns: {} ticks\n", i, dtime.as_secs() * 1000000000 + dtime.subsec_nanos() as u64, dtsc));
+        }
+    });
+
+    for i in 0..100 {
+        let time = Instant::now();
+        let tsc = unsafe { rdtscp() };
+        thread::yield_now();
+        let dtsc = unsafe { rdtscp() } - tsc;
+        let dtime = time.elapsed();
+        print!("{}", format!("P: {}: {} ns: {} ticks\n", i, dtime.as_secs() * 1000000000 + dtime.subsec_nanos() as u64, dtsc));
+    }
+
+    let _ = switch_thread.join();
+
+    Ok(())
+}
+
+fn thread_test() -> Result<(), String> {
+    use std::process::Command;
+    use std::thread;
+    use std::time::Instant;
+
     println!("Trying to stop kernel...");
 
     let start = Instant::now();
@@ -34,14 +67,42 @@ fn main() {
                 .wait().unwrap();
 
             for sub_thread in sub_threads {
-                sub_thread.join().unwrap();
+                let _ = sub_thread.join();
             }
         }));
     }
 
     for thread in threads {
-        thread.join().unwrap();
+        let _ = thread.join();
     }
 
     println!("Kernel survived thread test!");
+
+    Ok(())
+}
+
+fn main() {
+    use std::collections::BTreeMap;
+    use std::{env, process};
+
+    let mut tests: BTreeMap<&'static str, fn() -> Result<(), String>> = BTreeMap::new();
+    tests.insert("switch", switch_test);
+    tests.insert("thread", thread_test);
+
+    for arg in env::args().skip(1) {
+        if let Some(test) = tests.get(&arg.as_str()) {
+            match test() {
+                Ok(_) => {
+                    println!("acid: {}: passed", arg);
+                },
+                Err(err) => {
+                    println!("acid: {}: failed: {}", arg, err);
+                }
+            }
+        } else {
+            println!("acid: {}: not found", arg);
+            process::exit(1);
+        }
+    }
+
 }
