@@ -84,6 +84,7 @@ fn thread_test() -> Result<(), String> {
 fn main() {
     use std::collections::BTreeMap;
     use std::{env, process};
+    use std::time::Instant;
 
     let mut tests: BTreeMap<&'static str, fn() -> Result<(), String>> = BTreeMap::new();
     tests.insert("switch", switch_test);
@@ -91,9 +92,12 @@ fn main() {
 
     for arg in env::args().skip(1) {
         if let Some(test) = tests.get(&arg.as_str()) {
-            match test() {
+            let time = Instant::now();
+            let res = test();
+            let elapsed = time.elapsed();
+            match res {
                 Ok(_) => {
-                    println!("acid: {}: passed", arg);
+                    println!("acid: {}: passed: {} ns", arg, elapsed.as_secs() * 1000000000 + elapsed.subsec_nanos() as u64);
                 },
                 Err(err) => {
                     println!("acid: {}: failed: {}", arg, err);
