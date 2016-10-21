@@ -4,30 +4,29 @@ extern crate x86;
 
 fn switch_test() -> Result<(), String> {
     use std::thread;
-    use std::time::Instant;
     use x86::time::rdtscp;
 
-    let switch_thread = thread::spawn(|| {
-        for i in 0..100 {
-            let time = Instant::now();
-            let tsc = unsafe { rdtscp() };
+    let tsc = unsafe { rdtscp() };
+
+    let switch_thread = thread::spawn(|| -> usize {
+        let mut j = 0;
+        while j < 500 {
             thread::yield_now();
-            let dtsc = unsafe { rdtscp() } - tsc;
-            let dtime = time.elapsed();
-            print!("{}", format!("C: {}: {} ns: {} ticks\n", i, dtime.as_secs() * 1000000000 + dtime.subsec_nanos() as u64, dtsc));
+            j += 1;
         }
+        j
     });
 
-    for i in 0..100 {
-        let time = Instant::now();
-        let tsc = unsafe { rdtscp() };
+    let mut i = 0;
+    while i < 500 {
         thread::yield_now();
-        let dtsc = unsafe { rdtscp() } - tsc;
-        let dtime = time.elapsed();
-        print!("{}", format!("P: {}: {} ns: {} ticks\n", i, dtime.as_secs() * 1000000000 + dtime.subsec_nanos() as u64, dtsc));
+        i += 1;
     }
 
-    let _ = switch_thread.join();
+    let j = switch_thread.join().unwrap();
+
+    let dtsc = unsafe { rdtscp() } - tsc;
+    println!("P {} C {} T {}", i, j, dtsc);
 
     Ok(())
 }
