@@ -31,6 +31,17 @@ fn switch_test() -> Result<(), String> {
     Ok(())
 }
 
+fn tcp_fin_test() -> Result<(), String> {
+    use std::io::Write;
+    use std::net::TcpStream;
+
+    let mut conn = TcpStream::connect("static.redox-os.org:80").map_err(|err| format!("{}", err))?;
+    conn.write(b"TEST").map_err(|err| format!("{}", err))?;
+    drop(conn);
+
+    Ok(())
+}
+
 fn thread_test() -> Result<(), String> {
     use std::process::Command;
     use std::thread;
@@ -87,6 +98,7 @@ fn main() {
 
     let mut tests: BTreeMap<&'static str, fn() -> Result<(), String>> = BTreeMap::new();
     tests.insert("switch", switch_test);
+    tests.insert("tcp_fin", tcp_fin_test);
     tests.insert("thread", thread_test);
 
     for arg in env::args().skip(1) {
