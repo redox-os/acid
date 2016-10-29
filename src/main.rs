@@ -2,6 +2,16 @@
 
 extern crate x86;
 
+fn page_fault_test() -> Result<(), String> {
+    use std::thread;
+
+    thread::spawn(|| {
+        println!("{:X}", unsafe { *(0xDEADC0DE as *const u8) });
+    }).join().unwrap();
+
+    Ok(())
+}
+
 fn switch_test() -> Result<(), String> {
     use std::thread;
     use x86::time::rdtscp;
@@ -97,6 +107,7 @@ fn main() {
     use std::time::Instant;
 
     let mut tests: BTreeMap<&'static str, fn() -> Result<(), String>> = BTreeMap::new();
+    tests.insert("page_fault", page_fault_test);
     tests.insert("switch", switch_test);
     tests.insert("tcp_fin", tcp_fin_test);
     tests.insert("thread", thread_test);
