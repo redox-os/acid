@@ -1,4 +1,5 @@
-///Acid testing program
+//!Acid testing program
+#![feature(thread_local)]
 
 extern crate x86;
 
@@ -101,6 +102,39 @@ fn thread_test() -> Result<(), String> {
     Ok(())
 }
 
+/// Test of zero values in thread BSS
+#[thread_local]
+static mut TBSS_TEST_ZERO: usize = 0;
+/// Test of non-zero values in thread data.
+#[thread_local]
+static mut TDATA_TEST_NONZERO: usize = 0xFFFFFFFFFFFFFFFF;
+
+fn tls_test() -> Result<(), String> {
+    use std::thread;
+
+    thread::spawn(|| {
+        unsafe {
+            assert_eq!(TBSS_TEST_ZERO, 0);
+            TBSS_TEST_ZERO += 1;
+            assert_eq!(TBSS_TEST_ZERO, 1);
+            assert_eq!(TDATA_TEST_NONZERO, 0xFFFFFFFFFFFFFFFF);
+            TDATA_TEST_NONZERO -= 1;
+            assert_eq!(TDATA_TEST_NONZERO, 0xFFFFFFFFFFFFFFFE);
+        }
+    }).join().unwrap();
+
+    unsafe {
+        assert_eq!(TBSS_TEST_ZERO, 0);
+        TBSS_TEST_ZERO += 1;
+        assert_eq!(TBSS_TEST_ZERO, 1);
+        assert_eq!(TDATA_TEST_NONZERO, 0xFFFFFFFFFFFFFFFF);
+        TDATA_TEST_NONZERO -= 1;
+        assert_eq!(TDATA_TEST_NONZERO, 0xFFFFFFFFFFFFFFFE);
+    }
+
+    Ok(())
+}
+
 fn main() {
     use std::collections::BTreeMap;
     use std::{env, process};
@@ -111,9 +145,13 @@ fn main() {
     tests.insert("switch", switch_test);
     tests.insert("tcp_fin", tcp_fin_test);
     tests.insert("thread", thread_test);
+    tests.insert("tls", tls_test);
 
+    let mut ran_test = false;
     for arg in env::args().skip(1) {
         if let Some(test) = tests.get(&arg.as_str()) {
+            ran_test = true;
+
             let time = Instant::now();
             let res = test();
             let elapsed = time.elapsed();
@@ -131,4 +169,9 @@ fn main() {
         }
     }
 
+    if ! ran_test {
+        for test in tests {
+            println!("{}", test.0);
+        }
+    }
 }
