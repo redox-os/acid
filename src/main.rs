@@ -3,6 +3,44 @@
 
 extern crate x86;
 
+fn create_test() -> Result<(), String> {
+    use std::fs;
+    use std::io::{self, Read, Write};
+    use std::path::PathBuf;
+
+    let mut test_dir = PathBuf::new();
+    test_dir.push("test_dir");
+
+    let mut test_file = test_dir.clone();
+    test_file.push("test_file");
+    let test_file_err = fs::File::create(&test_file).err().map(|err| err.kind());
+    if test_file_err != Some(io::ErrorKind::NotFound) {
+        return Err(format!("Incorrect open error: {:?}, should be NotFound", test_file_err));
+    }
+
+    fs::create_dir(&test_dir).map_err(|err| format!("{}", err))?;
+
+    let test_data = "Test data";
+    {
+        let mut file = fs::File::create(&test_file).map_err(|err| format!("{}", err))?;
+        file.write(test_data.as_bytes()).map_err(|err| format!("{}", err))?;
+    }
+
+    {
+        let mut file = fs::File::open(&test_file).map_err(|err| format!("{}", err))?;
+        let mut buffer: Vec<u8> = Vec::new();
+        file.read_to_end(&mut buffer).map_err(|err| format!("{}", err))?;
+        assert_eq!(buffer.len(), test_data.len());
+        for (&a, b) in buffer.iter().zip(test_data.bytes()) {
+            if a != b {
+                return Err(format!("{} did not contain the correct data", test_file.display()));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn page_fault_test() -> Result<(), String> {
     use std::thread;
 
@@ -141,6 +179,7 @@ fn main() {
     use std::time::Instant;
 
     let mut tests: BTreeMap<&'static str, fn() -> Result<(), String>> = BTreeMap::new();
+    tests.insert("create_test", create_test);
     tests.insert("page_fault", page_fault_test);
     tests.insert("switch", switch_test);
     tests.insert("tcp_fin", tcp_fin_test);
