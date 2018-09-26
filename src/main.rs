@@ -111,7 +111,7 @@ fn thread_test() -> Result<(), String> {
             let mut sub_threads = Vec::new();
             for j in 0..10 {
                 sub_threads.push(thread::spawn(move || {
-                    Command::new("sh")
+                    Command::new("ion")
                         .arg("-c")
                         .arg(&format!("echo {}:{}", i, j))
                         .spawn().unwrap()
@@ -119,7 +119,7 @@ fn thread_test() -> Result<(), String> {
                 }));
             }
 
-            Command::new("sh")
+            Command::new("ion")
                 .arg("-c")
                 .arg(&format!("echo {}", i))
                 .spawn().unwrap()
