@@ -62,6 +62,7 @@ fn ptrace() -> Result<(), String> {
     if pid == 0 {
         unsafe {
             asm!("
+                // Wait until tracer is started
                 mov rax, 20 // GETPID
                 syscall
 
@@ -71,7 +72,9 @@ fn ptrace() -> Result<(), String> {
                 mov rsi, 19 // SIGSTOP
                 syscall
 
-                // Start of body
+                // Start of body:
+
+                // Test basic singlestepping
                 mov rax, 1
                 push rax
                 mov rax, 2
@@ -79,43 +82,80 @@ fn ptrace() -> Result<(), String> {
                 mov rax, 3
                 pop rax
                 pop rax
-                // End of body
 
-                mov rax, 1 // SYS_EXIT
-                mov rdi, 0
+                // Test behavior if tracer aborts a breakpoint before it's reached
+                call wait_for_a_while
+
+                mov rax, 158 // SYS_YIELD
                 syscall
+
+                mov rax, 37 // SYS_KILL
+                mov rsi, 19 // SIGSTOP
+                syscall
+
+                // Test nonblock & sysemu
+                call wait_for_a_while
+
+                mov rax, 20 // GETPID
+                syscall
+
+                mov rdi, rax
+                mov rax, 1 // SYS_EXIT
+                syscall
+
+                // Without a jump, this code is unreachable. Therefore function definitions go here.
+
+                wait_for_a_while:
+                mov rax, 4294967295
+                .loop:
+                sub rax, 1
+                jne .loop
+                ret
                 "
                 : : : : "intel", "volatile"
             );
         }
     }
 
-    // Wait until child is ready to be traced
+    println!("Waiting until child is ready to be traced...");
     let mut status = 0;
     syscall::waitpid(pid, &mut status, syscall::WUNTRACED).map_err(|e| format!("waitpid failed: {}", e))?;
 
-    // Stop & attach process + get handle to registers
-    let mut proc_file = File::open(format!("proc:{}/trace", pid)).map_err(|e| format!("open failed: {}", e))?;
-    let mut regs_file = unsafe {
+    println!("Done! Attaching tracer...");
+
+    // Stop and attach process + get handle to registers
+    let proc_file = File::open(format!("proc:{}/trace", pid)).map_err(|e| format!("open failed: {}", e))?;
+    let regs_file = unsafe {
         File::from_raw_fd(
             syscall::dup(proc_file.as_raw_fd() as usize, b"regs/int")
                 .map_err(|e| format!("dup failed: {}", e))? as c_int
         )
     };
 
-    // Schedule restart of process when resumed
+    println!("Schedule restart of process when resumed...");
     syscall::kill(pid, syscall::SIGCONT).map_err(|e| format!("kill failed: {}", e))?;
 
-    let mut next = move |op| -> Result<syscall::IntRegisters, String> {
-        proc_file.write(&[op]).map_err(|e| format!("ptrace operation failed: {}", e))?;
-
+    let getregs = || -> Result<syscall::IntRegisters, String> {
         let mut regs: syscall::IntRegisters = syscall::IntRegisters::default();
-        regs_file.read(&mut regs).map_err(|e| format!("reading registers failed: {}", e))?;
+        (&regs_file).read(&mut regs).map_err(|e| format!("reading registers failed: {}", e))?;
         Ok(regs)
     };
 
-    // Step out of syscall down to the next instruction
+    let setregs = |regs: &syscall::IntRegisters| -> Result<(), String> {
+        (&regs_file).write(&regs).map_err(|e| format!("writing registers failed: {}", e))?;
+        Ok(())
+    };
+
+    let next = |op| -> Result<syscall::IntRegisters, String> {
+        (&proc_file).write(&[op]).map_err(|e| format!("ptrace operation failed: {}", e))?;
+
+        getregs()
+    };
+
+    println!("Stepping away from the syscall instruction...");
     let _ = next(syscall::PTRACE_SINGLESTEP)?;
+
+    println!("Testing basic singlestepping...");
     assert_eq!(next(syscall::PTRACE_SINGLESTEP)?.rax, 1);
     assert_eq!(next(syscall::PTRACE_SINGLESTEP)?.rax, 2);
     assert_eq!(next(syscall::PTRACE_SINGLESTEP)?.rax, 2);
@@ -123,7 +163,47 @@ fn ptrace() -> Result<(), String> {
     assert_eq!(next(syscall::PTRACE_SINGLESTEP)?.rax, 2);
     assert_eq!(next(syscall::PTRACE_SINGLESTEP)?.rax, 1);
 
-    assert_eq!(next(syscall::PTRACE_SYSCALL)?.rax, syscall::SYS_EXIT);
+    let old_flags = syscall::fcntl(proc_file.as_raw_fd() as usize, syscall::F_GETFL, 0)
+        .map_err(|e| format!("fcntl get failed: {}", e))?;
+    let new_flags = old_flags | syscall::O_NONBLOCK;
+    syscall::fcntl(proc_file.as_raw_fd() as usize, syscall::F_SETFL, new_flags)
+        .map_err(|e| format!("fcntl set failed: {}", e))?;
+
+    println!("Testing behavior of obsolete breakpoints...");
+    next(syscall::PTRACE_SYSCALL)?;
+    next(syscall::PTRACE_CONT)?;
+    println!("Tracee RAX: {}", getregs()?.rax);
+
+    println!("Waiting for next signal from tracee that it's ready to be traced again...");
+    syscall::waitpid(pid, &mut status, syscall::WUNTRACED).map_err(|e| format!("waitpid failed: {}", e))?;
+
+    println!("Setting sysemu breakpoint...");
+    next(syscall::PTRACE_SYSCALL | syscall::PTRACE_SYSEMU)?;
+
+    println!("Schedule restart of process after breakpoint is set...");
+    syscall::kill(pid, syscall::SIGCONT).map_err(|e| format!("kill failed: {}", e))?;
+
+    println!("After non-blocking ptrace, execution continues as normal:");
+    for _ in 0..5 {
+        println!("Tracee RAX: {}", getregs()?.rax);
+    }
+
+    println!("Overriding GETPID call...");
+    let mut regs = next(syscall::PTRACE_WAIT)?;
+    assert_eq!(regs.rax, syscall::SYS_GETPID);
+    regs.rax = 123;
+    setregs(&regs)?;
+
+    syscall::fcntl(proc_file.as_raw_fd() as usize, syscall::F_SETFL, old_flags)
+        .map_err(|e| format!("fcntl set failed: {}", e))?;
+
+    println!("Checking exit status...");
+    let regs = next(syscall::PTRACE_SYSCALL)?;
+    assert_eq!(regs.rax, syscall::SYS_EXIT);
+    assert_eq!(regs.rdi, 123);
+    assert_eq!((&proc_file).write(&[syscall::PTRACE_SYSCALL]).unwrap_err().raw_os_error(), Some(syscall::ESRCH));
+
+    println!("All done and tested!");
 
     Ok(())
 }
