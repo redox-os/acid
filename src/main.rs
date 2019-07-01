@@ -1,5 +1,5 @@
 //!Acid testing program
-#![feature(thread_local)]
+#![feature(thread_local, asm)]
 
 extern crate x86;
 
@@ -47,6 +47,83 @@ fn page_fault_test() -> Result<(), String> {
     thread::spawn(|| {
         println!("{:X}", unsafe { *(0xDEADC0DE as *const u8) });
     }).join().unwrap();
+
+    Ok(())
+}
+
+fn ptrace() -> Result<(), String> {
+    use std::{
+        fs::File,
+        io::prelude::*,
+        os::{raw::c_int, unix::io::{AsRawFd, FromRawFd}}
+    };
+
+    let pid = unsafe { syscall::clone(0).map_err(|e| format!("clone failed: {}", e))? };
+    if pid == 0 {
+        unsafe {
+            asm!("
+                mov rax, 20 // GETPID
+                syscall
+
+                mov rdi, rax
+
+                mov rax, 37 // SYS_KILL
+                mov rsi, 19 // SIGSTOP
+                syscall
+
+                // Start of body
+                mov rax, 1
+                push rax
+                mov rax, 2
+                push rax
+                mov rax, 3
+                pop rax
+                pop rax
+                // End of body
+
+                mov rax, 1 // SYS_EXIT
+                mov rdi, 0
+                syscall
+                "
+                : : : : "intel", "volatile"
+            );
+        }
+    }
+
+    // Wait until child is ready to be traced
+    let mut status = 0;
+    syscall::waitpid(pid, &mut status, syscall::WUNTRACED).map_err(|e| format!("waitpid failed: {}", e))?;
+
+    // Stop & attach process + get handle to registers
+    let mut proc_file = File::open(format!("proc:{}/trace", pid)).map_err(|e| format!("open failed: {}", e))?;
+    let mut regs_file = unsafe {
+        File::from_raw_fd(
+            syscall::dup(proc_file.as_raw_fd() as usize, b"regs/int")
+                .map_err(|e| format!("dup failed: {}", e))? as c_int
+        )
+    };
+
+    // Schedule restart of process when resumed
+    syscall::kill(pid, syscall::SIGCONT).map_err(|e| format!("kill failed: {}", e))?;
+
+    let mut next = move |op| -> Result<syscall::IntRegisters, String> {
+        proc_file.write(&[op]).map_err(|e| format!("ptrace operation failed: {}", e))?;
+
+        let mut regs: syscall::IntRegisters = syscall::IntRegisters::default();
+        regs_file.read(&mut regs).map_err(|e| format!("reading registers failed: {}", e))?;
+        Ok(regs)
+    };
+
+    // Step out of syscall down to the next instruction
+    let _ = next(syscall::PTRACE_SINGLESTEP)?;
+    assert_eq!(next(syscall::PTRACE_SINGLESTEP)?.rax, 1);
+    assert_eq!(next(syscall::PTRACE_SINGLESTEP)?.rax, 2);
+    assert_eq!(next(syscall::PTRACE_SINGLESTEP)?.rax, 2);
+    assert_eq!(next(syscall::PTRACE_SINGLESTEP)?.rax, 3);
+    assert_eq!(next(syscall::PTRACE_SINGLESTEP)?.rax, 2);
+    assert_eq!(next(syscall::PTRACE_SINGLESTEP)?.rax, 1);
+
+    assert_eq!(next(syscall::PTRACE_SYSCALL)?.rax, syscall::SYS_EXIT);
 
     Ok(())
 }
@@ -181,6 +258,7 @@ fn main() {
     let mut tests: BTreeMap<&'static str, fn() -> Result<(), String>> = BTreeMap::new();
     tests.insert("create_test", create_test);
     tests.insert("page_fault", page_fault_test);
+    tests.insert("ptrace", ptrace);
     tests.insert("switch", switch_test);
     tests.insert("tcp_fin", tcp_fin_test);
     tests.insert("thread", thread_test);

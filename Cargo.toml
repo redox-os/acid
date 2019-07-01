@@ -5,3 +5,4 @@ authors = ["Jeremy Soller <jackpot51@gmail.com>"]
 
 [dependencies]
 x86 = "0.7"
+redox_syscall = { git = "https://gitlab.redox-os.org/jD91mZM2/syscall.git", branch = "ptrace" }

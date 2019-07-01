@@ -4,6 +4,7 @@
 name = "acid"
 version = "0.1.0"
 dependencies = [
+ "redox_syscall 0.1.54 (git+https://gitlab.redox-os.org/jD91mZM2/syscall.git?branch=ptrace)",
  "x86 0.7.2 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -202,6 +203,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "redox_syscall"
+version = "0.1.54"
+source = "git+https://gitlab.redox-os.org/jD91mZM2/syscall.git?branch=ptrace#a7aff4b60d537e6f336ff7e8affe8801a92c20f0"
+
+[[package]]
 name = "rustc-serialize"
 version = "0.3.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -284,6 +290,7 @@ dependencies = [
 "checksum rand_core 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "1961a422c4d189dfb50ffa9320bf1f2a9bd54ecb92792fb9477f99a1045f3372"
 "checksum rand_core 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "0905b6b7079ec73b314d4c748701f6931eb79fd97c668caa3f1899b22b32c6db"
 "checksum raw-cpuid 2.0.2 (registry+https://github.com/rust-lang/crates.io-index)" = "13b844e4049605ff38fed943f5c7b2c691fad68d9d5bf074d2720554c4e48246"
+"checksum redox_syscall 0.1.54 (git+https://gitlab.redox-os.org/jD91mZM2/syscall.git?branch=ptrace)" = "<none>"
 "checksum rustc-serialize 0.3.24 (registry+https://github.com/rust-lang/crates.io-index)" = "dcf128d1287d2ea9d80910b5f1120d0b8eede3fbf1abe91c40d39ea7d51e6fda"
 "checksum serde 0.6.15 (registry+https://github.com/rust-lang/crates.io-index)" = "c97b18e9e53de541f11e497357d6c5eaeb39f0cb9c8734e274abe4935f6991fa"
 "checksum serde_json 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)" = "b5aaee47e038bf9552d30380d3973fff2593ee0a76d81ad4c581f267cdcadf36"
