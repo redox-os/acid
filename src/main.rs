@@ -54,7 +54,8 @@ fn page_fault_test() -> Result<(), String> {
 fn ptrace() -> Result<(), String> {
     use std::{
         fs::File,
-        io::prelude::*,
+        io::{prelude::*, SeekFrom},
+        mem,
         os::{raw::c_int, unix::io::{AsRawFd, FromRawFd}}
     };
 
@@ -82,6 +83,12 @@ fn ptrace() -> Result<(), String> {
                 mov rax, 3
                 pop rax
                 pop rax
+
+                // Test memory access
+                push 3
+                push 2
+                push 1
+                add rsp, 3 // pop 3 items, ignore values
 
                 // Test behavior if tracer aborts a breakpoint before it's reached
                 call wait_for_a_while
@@ -131,6 +138,7 @@ fn ptrace() -> Result<(), String> {
                 .map_err(|e| format!("dup failed: {}", e))? as c_int
         )
     };
+    let mut mem_file = File::open(format!("proc:{}/mem", pid)).map_err(|e| format!("open failed: {}", e))?;
 
     println!("Schedule restart of process when resumed...");
     syscall::kill(pid, syscall::SIGCONT).map_err(|e| format!("kill failed: {}", e))?;
@@ -153,7 +161,7 @@ fn ptrace() -> Result<(), String> {
     };
 
     println!("Stepping away from the syscall instruction...");
-    let _ = next(syscall::PTRACE_SINGLESTEP)?;
+    next(syscall::PTRACE_SINGLESTEP)?;
 
     println!("Testing basic singlestepping...");
     assert_eq!(next(syscall::PTRACE_SINGLESTEP)?.rax, 1);
@@ -163,6 +171,30 @@ fn ptrace() -> Result<(), String> {
     assert_eq!(next(syscall::PTRACE_SINGLESTEP)?.rax, 2);
     assert_eq!(next(syscall::PTRACE_SINGLESTEP)?.rax, 1);
 
+    println!("Testing memory access...");
+    next(syscall::PTRACE_SINGLESTEP)?;
+    next(syscall::PTRACE_SINGLESTEP)?;
+
+    let rsp = next(syscall::PTRACE_SINGLESTEP)?.rsp;
+    mem_file.seek(SeekFrom::Start(rsp as u64)).map_err(|e| format!("memory seek failed: {}", e))?;
+
+    unsafe {
+        union Stack {
+            words: [usize; 3],
+            bytes: [u8; 3 * mem::size_of::<usize>()]
+        }
+        let mut out = Stack { words: [0; 3] };
+        mem_file.read(&mut out.bytes).map_err(|e| format!("memory read failed: {}", e))?;
+        assert_eq!(out.words, [1, 2, 3]);
+        assert_eq!(
+            mem_file.seek(SeekFrom::Current(0)).map_err(|e| format!("memory seek failed: {}", e))? as usize,
+            rsp + out.bytes.len()
+        );
+    }
+
+    next(syscall::PTRACE_SINGLESTEP)?;
+
+    // Activate nonblock
     let old_flags = syscall::fcntl(proc_file.as_raw_fd() as usize, syscall::F_GETFL, 0)
         .map_err(|e| format!("fcntl get failed: {}", e))?;
     let new_flags = old_flags | syscall::O_NONBLOCK;
@@ -194,6 +226,7 @@ fn ptrace() -> Result<(), String> {
     regs.rax = 123;
     setregs(&regs)?;
 
+    // Deactivate nonblock
     syscall::fcntl(proc_file.as_raw_fd() as usize, syscall::F_SETFL, old_flags)
         .map_err(|e| format!("fcntl set failed: {}", e))?;
 
