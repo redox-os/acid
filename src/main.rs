@@ -1,7 +1,9 @@
 //!Acid testing program
 #![feature(thread_local, asm)]
 
-extern crate x86;
+fn e<T, E: ToString>(error: Result<T, E>) -> Result<T, String> {
+    error.map_err(|e| e.to_string())
+}
 
 fn create_test() -> Result<(), String> {
     use std::fs;
@@ -51,15 +53,15 @@ fn page_fault_test() -> Result<(), String> {
     Ok(())
 }
 
-fn ptrace() -> Result<(), String> {
+pub fn ptrace() -> Result<(), String> {
     use std::{
         fs::File,
-        io::{prelude::*, SeekFrom},
         mem,
-        os::{raw::c_int, unix::io::{AsRawFd, FromRawFd}}
+        os::unix::io::{AsRawFd, FromRawFd, RawFd}
     };
+    use strace::*;
 
-    let pid = unsafe { syscall::clone(0).map_err(|e| format!("clone failed: {}", e))? };
+    let pid = e(unsafe { syscall::clone(0) })?;
     if pid == 0 {
         unsafe {
             asm!("
@@ -88,7 +90,13 @@ fn ptrace() -> Result<(), String> {
                 push 3
                 push 2
                 push 1
-                add rsp, 3 // pop 3 items, ignore values
+                add rsp, 8*3 // pop 3 items, ignore values
+
+                // Testing floating point
+                push 32
+                fild QWORD PTR [rsp]
+                fsqrt
+                add rsp, 8 // pop 1 item, ignore value
 
                 // Test behavior if tracer aborts a breakpoint before it's reached
                 call wait_for_a_while
@@ -126,57 +134,49 @@ fn ptrace() -> Result<(), String> {
 
     println!("Waiting until child is ready to be traced...");
     let mut status = 0;
-    syscall::waitpid(pid, &mut status, syscall::WUNTRACED).map_err(|e| format!("waitpid failed: {}", e))?;
+    e(syscall::waitpid(pid, &mut status, syscall::WUNTRACED))?;
 
     println!("Done! Attaching tracer...");
 
-    // Stop and attach process + get handle to registers
-    let proc_file = File::open(format!("proc:{}/trace", pid)).map_err(|e| format!("open failed: {}", e))?;
+    // Stop and attach process + get handle to registers.
+    // This also tests the behaviour of dup(...)
+    let proc_file = e(File::open(format!("proc:{}/trace", pid)))?;
     let regs_file = unsafe {
-        File::from_raw_fd(
-            syscall::dup(proc_file.as_raw_fd() as usize, b"regs/int")
-                .map_err(|e| format!("dup failed: {}", e))? as c_int
-        )
+        File::from_raw_fd(e(syscall::dup(proc_file.as_raw_fd() as usize, b"regs/int"))? as RawFd)
     };
-    let mut mem_file = File::open(format!("proc:{}/mem", pid)).map_err(|e| format!("open failed: {}", e))?;
+    let regs_file_float = unsafe {
+        File::from_raw_fd(e(syscall::dup(regs_file.as_raw_fd() as usize, b"regs/float"))? as RawFd)
+    };
+
+    let mut tracer = Tracer {
+        file: proc_file,
+        regs: Registers {
+            float: regs_file_float,
+            int: regs_file
+        },
+        mem: e(Memory::attach(pid))?
+    };
 
     println!("Schedule restart of process when resumed...");
-    syscall::kill(pid, syscall::SIGCONT).map_err(|e| format!("kill failed: {}", e))?;
-
-    let getregs = || -> Result<syscall::IntRegisters, String> {
-        let mut regs: syscall::IntRegisters = syscall::IntRegisters::default();
-        (&regs_file).read(&mut regs).map_err(|e| format!("reading registers failed: {}", e))?;
-        Ok(regs)
-    };
-
-    let setregs = |regs: &syscall::IntRegisters| -> Result<(), String> {
-        (&regs_file).write(&regs).map_err(|e| format!("writing registers failed: {}", e))?;
-        Ok(())
-    };
-
-    let next = |op| -> Result<syscall::IntRegisters, String> {
-        (&proc_file).write(&[op]).map_err(|e| format!("ptrace operation failed: {}", e))?;
-
-        getregs()
-    };
+    e(syscall::kill(pid, syscall::SIGCONT))?;
 
     println!("Stepping away from the syscall instruction...");
-    next(syscall::PTRACE_SINGLESTEP)?;
+    e(tracer.next(Stop::INSTRUCTION))?;
 
     println!("Testing basic singlestepping...");
-    assert_eq!(next(syscall::PTRACE_SINGLESTEP)?.rax, 1);
-    assert_eq!(next(syscall::PTRACE_SINGLESTEP)?.rax, 2);
-    assert_eq!(next(syscall::PTRACE_SINGLESTEP)?.rax, 2);
-    assert_eq!(next(syscall::PTRACE_SINGLESTEP)?.rax, 3);
-    assert_eq!(next(syscall::PTRACE_SINGLESTEP)?.rax, 2);
-    assert_eq!(next(syscall::PTRACE_SINGLESTEP)?.rax, 1);
+    assert_eq!(e(e(tracer.next(Stop::INSTRUCTION))?.regs.get_int())?.rax, 1);
+    assert_eq!(e(e(tracer.next(Stop::INSTRUCTION))?.regs.get_int())?.rax, 2);
+    assert_eq!(e(e(tracer.next(Stop::INSTRUCTION))?.regs.get_int())?.rax, 2);
+    assert_eq!(e(e(tracer.next(Stop::INSTRUCTION))?.regs.get_int())?.rax, 3);
+    assert_eq!(e(e(tracer.next(Stop::INSTRUCTION))?.regs.get_int())?.rax, 2);
+    assert_eq!(e(e(tracer.next(Stop::INSTRUCTION))?.regs.get_int())?.rax, 1);
 
     println!("Testing memory access...");
-    next(syscall::PTRACE_SINGLESTEP)?;
-    next(syscall::PTRACE_SINGLESTEP)?;
+    e(tracer.next(Stop::INSTRUCTION))?;
+    e(tracer.next(Stop::INSTRUCTION))?;
 
-    let rsp = next(syscall::PTRACE_SINGLESTEP)?.rsp;
-    mem_file.seek(SeekFrom::Start(rsp as u64)).map_err(|e| format!("memory seek failed: {}", e))?;
+    e(tracer.next(Stop::INSTRUCTION))?;
+    let regs = e(tracer.regs.get_int())?;
 
     unsafe {
         union Stack {
@@ -184,57 +184,60 @@ fn ptrace() -> Result<(), String> {
             bytes: [u8; 3 * mem::size_of::<usize>()]
         }
         let mut out = Stack { words: [0; 3] };
-        mem_file.read(&mut out.bytes).map_err(|e| format!("memory read failed: {}", e))?;
+        e(tracer.mem.read(regs.rsp as *const _, &mut out.bytes))?;
         assert_eq!(out.words, [1, 2, 3]);
-        assert_eq!(
-            mem_file.seek(SeekFrom::Current(0)).map_err(|e| format!("memory seek failed: {}", e))? as usize,
-            rsp + out.bytes.len()
-        );
+        assert_eq!(e(tracer.mem.cursor())? as usize, regs.rsp + out.bytes.len());
     }
 
-    next(syscall::PTRACE_SINGLESTEP)?;
+    e(tracer.next(Stop::INSTRUCTION))?;
+
+    println!("Testing floating point...");
+    for _ in 0..3 {
+        e(tracer.next(Stop::INSTRUCTION))?;
+    }
+    let regs = e(tracer.regs.get_float())?;
+    let f = regs.st_space_nth(0);
+    let fs = regs.st_space();
+    assert_eq!(fs, [f, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+    assert!((f - 5.65685424949238).abs() < std::f64::EPSILON);
 
     // Activate nonblock
-    let old_flags = syscall::fcntl(proc_file.as_raw_fd() as usize, syscall::F_GETFL, 0)
-        .map_err(|e| format!("fcntl get failed: {}", e))?;
-    let new_flags = old_flags | syscall::O_NONBLOCK;
-    syscall::fcntl(proc_file.as_raw_fd() as usize, syscall::F_SETFL, new_flags)
-        .map_err(|e| format!("fcntl set failed: {}", e))?;
+    let mut tracer = e(tracer.nonblocking())?;
 
     println!("Testing behavior of obsolete breakpoints...");
-    next(syscall::PTRACE_SYSCALL)?;
-    next(syscall::PTRACE_CONT)?;
-    println!("Tracee RAX: {}", getregs()?.rax);
+    e(tracer.next(Stop::SYSCALL))?;
+    e(tracer.next(Stop::COMPLETION))?;
+    println!("Tracee RAX: {}", e(tracer.regs.get_int())?.rax);
 
     println!("Waiting for next signal from tracee that it's ready to be traced again...");
-    syscall::waitpid(pid, &mut status, syscall::WUNTRACED).map_err(|e| format!("waitpid failed: {}", e))?;
+    e(syscall::waitpid(pid, &mut status, syscall::WUNTRACED))?;
 
     println!("Setting sysemu breakpoint...");
-    next(syscall::PTRACE_SYSCALL | syscall::PTRACE_SYSEMU)?;
+    e(tracer.next(Stop::SYSCALL | Stop::SYSEMU))?;
 
     println!("Schedule restart of process after breakpoint is set...");
-    syscall::kill(pid, syscall::SIGCONT).map_err(|e| format!("kill failed: {}", e))?;
+    e(syscall::kill(pid, syscall::SIGCONT))?;
 
     println!("After non-blocking ptrace, execution continues as normal:");
     for _ in 0..5 {
-        println!("Tracee RAX: {}", getregs()?.rax);
+        println!("Tracee RAX: {}", e(tracer.regs.get_int())?.rax);
     }
 
     println!("Overriding GETPID call...");
-    let mut regs = next(syscall::PTRACE_WAIT)?;
+    e(tracer.wait())?;
+    let mut regs = e(tracer.regs.get_int())?;
     assert_eq!(regs.rax, syscall::SYS_GETPID);
     regs.rax = 123;
-    setregs(&regs)?;
+    e(tracer.regs.set_int(&regs))?;
 
-    // Deactivate nonblock
-    syscall::fcntl(proc_file.as_raw_fd() as usize, syscall::F_SETFL, old_flags)
-        .map_err(|e| format!("fcntl set failed: {}", e))?;
+    let mut tracer = e(tracer.blocking())?;
 
     println!("Checking exit status...");
-    let regs = next(syscall::PTRACE_SYSCALL)?;
+    e(tracer.next(Stop::SYSCALL))?;
+    let regs = e(tracer.regs.get_int())?;
     assert_eq!(regs.rax, syscall::SYS_EXIT);
     assert_eq!(regs.rdi, 123);
-    assert_eq!((&proc_file).write(&[syscall::PTRACE_SYSCALL]).unwrap_err().raw_os_error(), Some(syscall::ESRCH));
+    assert_eq!(tracer.next(Stop::SYSCALL).unwrap_err().raw_os_error(), Some(syscall::ESRCH));
 
     println!("All done and tested!");
 
