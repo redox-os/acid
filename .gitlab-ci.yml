@@ -1,0 +1,24 @@
+image: "redoxos/redoxer"
+
+stages:
+    - build
+    - test
+
+cache:
+    paths:
+        - target/
+
+build:redox:
+    stage: build
+    script: redoxer build --verbose
+
+test:redox:
+    stage: test
+    dependencies:
+        - build:redox
+    script:
+        - redoxer run --verbose --
+          create_test
+          switch
+          tcp_fin
+          tls
