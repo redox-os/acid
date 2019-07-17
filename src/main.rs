@@ -232,12 +232,18 @@ pub fn ptrace() -> Result<(), String> {
 
     let mut tracer = e(tracer.blocking())?;
 
-    println!("Checking exit status...");
+    println!("Checking exit syscall...");
     e(tracer.next(Stop::SYSCALL))?;
     let regs = e(tracer.regs.get_int())?;
     assert_eq!(regs.rax, syscall::SYS_EXIT);
     assert_eq!(regs.rdi, 123);
     assert_eq!(tracer.next(Stop::SYSCALL).unwrap_err().raw_os_error(), Some(syscall::ESRCH));
+
+    println!("Checking exit status (waitpid nohang)...");
+    let mut status = 0;
+    e(syscall::waitpid(pid, &mut status, syscall::WNOHANG))?;
+    assert!(syscall::wifexited(status));
+    assert_eq!(syscall::wexitstatus(status), 123);
 
     println!("All done and tested!");
 
