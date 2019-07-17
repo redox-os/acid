@@ -132,7 +132,8 @@ pub fn ptrace() -> Result<(), String> {
         }
     }
 
-    println!("Waiting until child is ready to be traced...");
+    println!("My PID: {}", e(syscall::getpid())?);
+    println!("Waiting until child (pid {}) is ready to be traced...", pid);
     let mut status = 0;
     e(syscall::waitpid(pid, &mut status, syscall::WUNTRACED))?;
 
@@ -244,6 +245,15 @@ pub fn ptrace() -> Result<(), String> {
     e(syscall::waitpid(pid, &mut status, syscall::WNOHANG))?;
     assert!(syscall::wifexited(status));
     assert_eq!(syscall::wexitstatus(status), 123);
+
+    println!("Trying to do illegal things...");
+    for id in 0..=1_000_000 {
+        let err = File::open(format!("proc:{}/regs/int", id)).map(|_| None).unwrap_or_else(|err| err.raw_os_error());
+        assert!(
+            err == Some(syscall::EPERM) || err == Some(syscall::ESRCH),
+            "The cops ignored that I tried to illegally open PID {}: {:?}", id, err
+        );
+    }
 
     println!("All done and tested!");
 
