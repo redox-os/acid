@@ -6,6 +6,7 @@ edition = "2018"
 
 [dependencies]
 x86 = "0.7"
+# redox_syscall = { git = "https://gitlab.redox-os.org/redox-os/syscall.git" }
 redox_syscall = { git = "https://gitlab.redox-os.org/jD91mZM2/syscall.git", branch = "ptrace" }
 # redox_syscall = { path = "/home/user/redox-nix/redox/kernel/syscall" }
 strace = { git = "https://gitlab.redox-os.org/redox-os/strace-redox" }

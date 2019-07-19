@@ -56,6 +56,7 @@ fn page_fault_test() -> Result<(), String> {
 pub fn ptrace() -> Result<(), String> {
     use std::{
         fs::File,
+        io,
         mem,
         os::unix::io::{AsRawFd, FromRawFd, RawFd}
     };
@@ -98,12 +99,39 @@ pub fn ptrace() -> Result<(), String> {
                 fsqrt
                 add rsp, 8 // pop 1 item, ignore value
 
+                // Make sure event is raised when child forks
+                mov rax, 120 // SYS_CLONE
+                xor rdi, rdi
+                syscall
+                test rax, rax
+                je .exit
+
+                // Wait for child process, to make sure an ignored process is continued
+                mov rdi, rax
+                mov rax, 7
+                push 0
+                mov rsi, rsp
+                add rsp, 8
+                xor rdx, rdx
+                syscall
+
+                // Another fork attempt, but test what happens when not ignored
+                mov rax, 120 // SYS_CLONE
+                xor rdi, rdi
+                syscall
+                test rax, rax
+                je .exit
+
                 // Test behavior if tracer aborts a breakpoint before it's reached
                 call wait_for_a_while
 
                 mov rax, 158 // SYS_YIELD
                 syscall
 
+                mov rax, 20 // GETPID
+                syscall
+
+                mov rdi, rax
                 mov rax, 37 // SYS_KILL
                 mov rsi, 19 // SIGSTOP
                 syscall
@@ -111,20 +139,22 @@ pub fn ptrace() -> Result<(), String> {
                 // Test nonblock & sysemu
                 call wait_for_a_while
 
+                .exit:
                 mov rax, 20 // GETPID
                 syscall
 
                 mov rdi, rax
                 mov rax, 1 // SYS_EXIT
                 syscall
+                ud2
 
                 // Without a jump, this code is unreachable. Therefore function definitions go here.
 
                 wait_for_a_while:
                 mov rax, 4294967295
-                .loop:
+                .wait_for_a_while_loop:
                 sub rax, 1
-                jne .loop
+                jne .wait_for_a_while_loop
                 ret
                 "
                 : : : : "intel", "volatile"
@@ -202,6 +232,36 @@ pub fn ptrace() -> Result<(), String> {
     assert_eq!(fs, [f, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
     assert!((f - 5.65685424949238).abs() < std::f64::EPSILON);
 
+    println!("Testing fork event");
+    let mut handler = e(tracer.next_event(Stop::COMPLETION))?.ok_or("Program completed without yielding fork event")?;
+    let events = e(handler.iter().collect::<io::Result<Vec<_>>>())?;
+
+    assert_eq!(events.len(), 1);
+    match events[0] {
+        PtraceEvent::Clone(pid) => println!("Got clone: {}", pid),
+        ref e => return Err(format!("Wrong event type: {:?}", e))
+    }
+
+    println!("Testing fork event - but actually handling the fork");
+    handler = e(handler.retry())?.ok_or("Program completed without yielding fork event")?;
+    let events = e(handler.iter().collect::<io::Result<Vec<_>>>())?;
+    assert_eq!(events.len(), 1);
+    match events[0] {
+        PtraceEvent::Clone(pid) => {
+            let mut child = e(Tracer::attach(pid))?;
+            println!("-> Fork attached (PID {})", pid);
+
+            assert_eq!(e(e(child.next(Stop::SYSCALL))?.regs.get_int())?.rax, syscall::SYS_GETPID);
+            e(child.next(Stop::SYSCALL))?;
+            println!("-> Fork executed GETPID");
+
+            assert_eq!(e(e(child.next(Stop::SYSCALL))?.regs.get_int())?.rax, syscall::SYS_EXIT);
+            assert_eq!(child.next(Stop::COMPLETION).unwrap_err().raw_os_error(), Some(syscall::ESRCH));
+            println!("-> Fork executed EXIT");
+        },
+        ref e => return Err(format!("Wrong event type: {:?}", e))
+    }
+
     // Activate nonblock
     let mut tracer = e(tracer.nonblocking())?;
 
@@ -224,8 +284,12 @@ pub fn ptrace() -> Result<(), String> {
         println!("Tracee RAX: {}", e(tracer.regs.get_int())?.rax);
     }
 
+    println!("Waiting... Five times. To make sure it doesn't get stuck forever");
+    for _ in 0..5 {
+        e(tracer.wait())?;
+    }
+
     println!("Overriding GETPID call...");
-    e(tracer.wait())?;
     let mut regs = e(tracer.regs.get_int())?;
     assert_eq!(regs.rax, syscall::SYS_GETPID);
     regs.rax = 123;
