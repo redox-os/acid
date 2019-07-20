@@ -64,10 +64,35 @@ pub fn ptrace() -> Result<(), String> {
 
     let pid = e(unsafe { syscall::clone(0) })?;
     if pid == 0 {
+        extern "C" fn sighandler(_: usize) {
+            unsafe {
+                asm!("
+                    mov rax, 158 // SYS_YIELD
+                    syscall
+                "
+                : : : : "intel", "volatile");
+            }
+        }
+        extern "C" fn sigreturn() {
+            unsafe {
+                asm!("
+                    mov rax, 119 // SYS_SIGRETURN
+                    syscall
+                    ud2
+                "
+                : : : : "intel", "volatile");
+            }
+        }
         unsafe {
             asm!("
+                // Push any arguments from rust to the stack so we're
+                // free to use whatever registers we want
+                push $1
+                push $0
+                mov rbp, rsp
+
                 // Wait until tracer is started
-                mov rax, 20 // GETPID
+                mov rax, 20 // SYS_GETPID
                 syscall
 
                 mov rdi, rax
@@ -104,23 +129,44 @@ pub fn ptrace() -> Result<(), String> {
                 xor rdi, rdi
                 syscall
                 test rax, rax
-                je .exit
+                je exit
 
                 // Wait for child process, to make sure an ignored process is continued
                 mov rdi, rax
                 mov rax, 7
                 push 0
                 mov rsi, rsp
-                add rsp, 8
                 xor rdx, rdx
                 syscall
+                add rsp, 8
 
                 // Another fork attempt, but test what happens when not ignored
                 mov rax, 120 // SYS_CLONE
                 xor rdi, rdi
                 syscall
                 test rax, rax
-                je .exit
+                je exit
+
+                // Test behavior of signals
+                mov rax, 67 // SYS_SIGACTION
+                mov rdi, 10 // SIGUSR1
+                push 0 // sa_flags
+                push 0 // sa_mask[1]
+                push 0 // sa_mask[0]
+                push [rbp] // sa_handler
+                mov rsi, rsp
+                xor rdx, rdx
+                mov r10, [rbp+0x8]
+                syscall
+                add rsp, 8*4
+
+                mov rax, 20 // SYS_GETPID
+                syscall
+
+                mov rdi, rax
+                mov rax, 37 // SYS_KILL
+                mov rsi, 10 // SIGUSR1
+                syscall
 
                 // Test behavior if tracer aborts a breakpoint before it's reached
                 call wait_for_a_while
@@ -128,7 +174,7 @@ pub fn ptrace() -> Result<(), String> {
                 mov rax, 158 // SYS_YIELD
                 syscall
 
-                mov rax, 20 // GETPID
+                mov rax, 20 // SYS_GETPID
                 syscall
 
                 mov rdi, rax
@@ -139,8 +185,8 @@ pub fn ptrace() -> Result<(), String> {
                 // Test nonblock & sysemu
                 call wait_for_a_while
 
-                .exit:
-                mov rax, 20 // GETPID
+                exit:
+                mov rax, 20 // SYS_GETPID
                 syscall
 
                 mov rdi, rax
@@ -152,12 +198,15 @@ pub fn ptrace() -> Result<(), String> {
 
                 wait_for_a_while:
                 mov rax, 4294967295
-                .wait_for_a_while_loop:
+                wait_for_a_while_loop:
                 sub rax, 1
-                jne .wait_for_a_while_loop
+                jne wait_for_a_while_loop
                 ret
                 "
-                : : : : "intel", "volatile"
+                : // no outputs
+                : "r"(sighandler as usize), "r"(sigreturn as usize)
+                : // no clobbers
+                : "intel", "volatile"
             );
         }
     }
@@ -169,8 +218,8 @@ pub fn ptrace() -> Result<(), String> {
 
     println!("Done! Attaching tracer...");
 
-    // Stop and attach process + get handle to registers.
-    // This also tests the behaviour of dup(...)
+    // Stop and attach process + get handle to registers. This also
+    // tests the behavior of dup(...)
     let proc_file = e(File::open(format!("proc:{}/trace", pid)))?;
     let regs_file = unsafe {
         File::from_raw_fd(e(syscall::dup(proc_file.as_raw_fd() as usize, b"regs/int"))? as RawFd)
@@ -233,17 +282,22 @@ pub fn ptrace() -> Result<(), String> {
     assert!((f - 5.65685424949238).abs() < std::f64::EPSILON);
 
     println!("Testing fork event");
-    let mut handler = e(tracer.next_event(Stop::COMPLETION))?.ok_or("Program completed without yielding fork event")?;
+    assert!(e(tracer.next_event(Stop::SYSCALL))?.is_none()); // pre-syscall
+    let mut handler = e(tracer.next_event(Stop::SYSCALL))?.ok_or("Syscall completed without yielding fork event")?; // post-syscall
     let events = e(handler.iter().collect::<io::Result<Vec<_>>>())?;
 
     assert_eq!(events.len(), 1);
     match events[0] {
-        PtraceEvent::Clone(pid) => println!("Got clone: {}", pid),
+        PtraceEvent::Clone(pid) => println!("Obtained fork (PID {})", pid),
         ref e => return Err(format!("Wrong event type: {:?}", e))
     }
 
     println!("Testing fork event - but actually handling the fork");
-    handler = e(handler.retry())?.ok_or("Program completed without yielding fork event")?;
+    for _ in 0..3 { // pre-post-waitpid, pre-clone
+        assert!(e(tracer.next_event(Stop::SYSCALL))?.is_none());
+    }
+    let mut handler = e(tracer.next_event(Stop::SYSCALL))?.ok_or("Syscall completed without yielding fork event")?;
+    // handler = e(handler.retry())?.ok_or("Program completed without yielding fork event")?;
     let events = e(handler.iter().collect::<io::Result<Vec<_>>>())?;
     assert_eq!(events.len(), 1);
     match events[0] {
@@ -261,6 +315,19 @@ pub fn ptrace() -> Result<(), String> {
         },
         ref e => return Err(format!("Wrong event type: {:?}", e))
     }
+
+    println!("Testing signals");
+    assert_eq!(e(e(tracer.next(Stop::SYSCALL))?.regs.get_int())?.rax, syscall::SYS_SIGACTION);
+    e(tracer.next(Stop::SYSCALL))?; // post-syscall sigaction
+    assert_eq!(e(e(tracer.next(Stop::SYSCALL))?.regs.get_int())?.rax, syscall::SYS_GETPID);
+    e(tracer.next(Stop::SYSCALL))?; // post-syscall getpid
+    assert_eq!(e(e(tracer.next(Stop::SYSCALL))?.regs.get_int())?.rax, syscall::SYS_KILL);
+    // kill doesn't return *yet*
+    assert_eq!(e(e(tracer.next(Stop::SYSCALL))?.regs.get_int())?.rax, syscall::SYS_YIELD);
+    e(tracer.next(Stop::SYSCALL))?; // post-syscall yield
+    assert_eq!(e(e(tracer.next(Stop::SYSCALL))?.regs.get_int())?.rax, syscall::SYS_SIGRETURN);
+    // sigreturn doesn't return
+    e(tracer.next(Stop::SYSCALL))?; // post-syscall kill!
 
     // Activate nonblock
     let mut tracer = e(tracer.nonblocking())?;
