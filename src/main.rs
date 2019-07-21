@@ -168,6 +168,10 @@ pub fn ptrace() -> Result<(), String> {
                 mov rsi, 10 // SIGUSR1
                 syscall
 
+                // aaand again
+                mov rax, 37 // SYS_KILL
+                syscall
+
                 // Test behavior if tracer aborts a breakpoint before it's reached
                 call wait_for_a_while
 
@@ -291,6 +295,7 @@ pub fn ptrace() -> Result<(), String> {
         PtraceEvent::Clone(pid) => println!("Obtained fork (PID {})", pid),
         ref e => return Err(format!("Wrong event type: {:?}", e))
     }
+    assert!(e(handler.retry())?.is_none());
 
     println!("Testing fork event - but actually handling the fork");
     for _ in 0..3 { // pre-post-waitpid, pre-clone
@@ -315,6 +320,7 @@ pub fn ptrace() -> Result<(), String> {
         },
         ref e => return Err(format!("Wrong event type: {:?}", e))
     }
+    assert!(e(handler.retry())?.is_none());
 
     println!("Testing signals");
     assert_eq!(e(e(tracer.next(Stop::SYSCALL))?.regs.get_int())?.rax, syscall::SYS_SIGACTION);
@@ -323,11 +329,33 @@ pub fn ptrace() -> Result<(), String> {
     e(tracer.next(Stop::SYSCALL))?; // post-syscall getpid
     assert_eq!(e(e(tracer.next(Stop::SYSCALL))?.regs.get_int())?.rax, syscall::SYS_KILL);
     // kill doesn't return *yet*
-    assert_eq!(e(e(tracer.next(Stop::SYSCALL))?.regs.get_int())?.rax, syscall::SYS_YIELD);
-    e(tracer.next(Stop::SYSCALL))?; // post-syscall yield
-    assert_eq!(e(e(tracer.next(Stop::SYSCALL))?.regs.get_int())?.rax, syscall::SYS_SIGRETURN);
-    // sigreturn doesn't return
-    e(tracer.next(Stop::SYSCALL))?; // post-syscall kill!
+
+    let mut handler = e(tracer.next_event(Stop::SYSCALL))?.ok_or("Syscall completed without yielding  event")?;
+    let events = e(handler.iter().collect::<io::Result<Vec<_>>>())?;
+
+    assert_eq!(events.len(), 1);
+    match events[0] {
+        PtraceEvent::Signal(signal) => {
+            assert_eq!(signal, syscall::SIGUSR1);
+            println!("Obtained signal");
+        },
+        ref e => return Err(format!("Wrong event type: {:?}", e))
+    }
+
+    assert!(e(handler.retry())?.is_none());
+    for i in 0..2 {
+        assert_eq!(e(tracer.regs.get_int())?.rax, syscall::SYS_YIELD);
+        e(tracer.next(Stop::SYSCALL))?; // post-syscall yield
+        assert_eq!(e(e(tracer.next(Stop::SYSCALL))?.regs.get_int())?.rax, syscall::SYS_SIGRETURN);
+        // sigreturn doesn't return
+        e(tracer.next(Stop::SYSCALL))?; // post-syscall kill!
+
+        if i == 0 {
+            e(tracer.next(Stop::SIGNAL))?;
+            assert_eq!(e(tracer.regs.get_int())?.rax, syscall::SYS_KILL);
+            e(tracer.next(Stop::SYSCALL))?;
+        }
+    }
 
     // Activate nonblock
     let mut tracer = e(tracer.nonblocking())?;
@@ -351,7 +379,7 @@ pub fn ptrace() -> Result<(), String> {
         println!("Tracee RAX: {}", e(tracer.regs.get_int())?.rax);
     }
 
-    println!("Waiting... Five times. To make sure it doesn't get stuck forever");
+    println!("Waiting... Five times... To make sure it doesn't get stuck forever...");
     for _ in 0..5 {
         e(tracer.wait())?;
     }

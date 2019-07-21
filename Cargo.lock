@@ -206,7 +206,7 @@ dependencies = [
 [[package]]
 name = "redox_syscall"
 version = "0.1.56"
-source = "git+https://gitlab.redox-os.org/jD91mZM2/syscall.git?branch=ptrace#eddcb80eb7c2d43dedf0ba2ee514b54b0b8fafc7"
+source = "git+https://gitlab.redox-os.org/jD91mZM2/syscall.git?branch=ptrace#844650c4fb9725cd9029de6277826bfe0fb19909"
 
 [[package]]
 name = "rustc-serialize"
@@ -238,7 +238,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "strace"
 version = "0.1.0"
-source = "git+https://gitlab.redox-os.org/redox-os/strace-redox#b5740938279dbc8334e361d3a8bfc9a4ca64c9ce"
+source = "git+https://gitlab.redox-os.org/redox-os/strace-redox#b1ea95f266029e1fc82892c3ce8a10521840135c"
 dependencies = [
  "bitflags 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "redox_syscall 0.1.56 (git+https://gitlab.redox-os.org/jD91mZM2/syscall.git?branch=ptrace)",
