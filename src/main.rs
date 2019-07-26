@@ -55,10 +55,12 @@ fn page_fault_test() -> Result<(), String> {
 
 pub fn ptrace() -> Result<(), String> {
     use std::{
-        fs::File,
+        fs::{File, OpenOptions},
         io,
         mem,
-        os::unix::io::{AsRawFd, FromRawFd, RawFd}
+        os::unix::io::{AsRawFd, FromRawFd, RawFd},
+        thread,
+        time::Duration,
     };
     use strace::*;
 
@@ -224,7 +226,7 @@ pub fn ptrace() -> Result<(), String> {
 
     // Stop and attach process + get handle to registers. This also
     // tests the behavior of dup(...)
-    let proc_file = e(File::open(format!("proc:{}/trace", pid)))?;
+    let proc_file = e(OpenOptions::new().read(true).write(true).truncate(true).open(format!("proc:{}/trace", pid)))?;
     let regs_file = unsafe {
         File::from_raw_fd(e(syscall::dup(proc_file.as_raw_fd() as usize, b"regs/int"))? as RawFd)
     };
@@ -241,25 +243,34 @@ pub fn ptrace() -> Result<(), String> {
         mem: e(Memory::attach(pid))?
     };
 
+    fn next(tracer: &mut Tracer, flags: Flags) -> io::Result<&mut Tracer> {
+        let event = tracer.next(flags)?;
+        assert_eq!(event.cause & flags, event.cause);
+        Ok(tracer)
+    }
+
     println!("Schedule restart of process when resumed...");
     e(syscall::kill(pid, syscall::SIGCONT))?;
 
+    println!("But the process won't be restarted until then");
+    thread::sleep(Duration::from_secs(1));
+
     println!("Stepping away from the syscall instruction...");
-    e(tracer.next(Stop::INSTRUCTION))?;
+    e(next(&mut tracer, Flags::STOP_SINGLESTEP))?;
 
     println!("Testing basic singlestepping...");
-    assert_eq!(e(e(tracer.next(Stop::INSTRUCTION))?.regs.get_int())?.rax, 1);
-    assert_eq!(e(e(tracer.next(Stop::INSTRUCTION))?.regs.get_int())?.rax, 2);
-    assert_eq!(e(e(tracer.next(Stop::INSTRUCTION))?.regs.get_int())?.rax, 2);
-    assert_eq!(e(e(tracer.next(Stop::INSTRUCTION))?.regs.get_int())?.rax, 3);
-    assert_eq!(e(e(tracer.next(Stop::INSTRUCTION))?.regs.get_int())?.rax, 2);
-    assert_eq!(e(e(tracer.next(Stop::INSTRUCTION))?.regs.get_int())?.rax, 1);
+    assert_eq!(e(e(next(&mut tracer, Flags::STOP_SINGLESTEP))?.regs.get_int())?.rax, 1);
+    assert_eq!(e(e(next(&mut tracer, Flags::STOP_SINGLESTEP))?.regs.get_int())?.rax, 2);
+    assert_eq!(e(e(next(&mut tracer, Flags::STOP_SINGLESTEP))?.regs.get_int())?.rax, 2);
+    assert_eq!(e(e(next(&mut tracer, Flags::STOP_SINGLESTEP))?.regs.get_int())?.rax, 3);
+    assert_eq!(e(e(next(&mut tracer, Flags::STOP_SINGLESTEP))?.regs.get_int())?.rax, 2);
+    assert_eq!(e(e(next(&mut tracer, Flags::STOP_SINGLESTEP))?.regs.get_int())?.rax, 1);
 
     println!("Testing memory access...");
-    e(tracer.next(Stop::INSTRUCTION))?;
-    e(tracer.next(Stop::INSTRUCTION))?;
+    e(next(&mut tracer, Flags::STOP_SINGLESTEP))?;
+    e(next(&mut tracer, Flags::STOP_SINGLESTEP))?;
 
-    e(tracer.next(Stop::INSTRUCTION))?;
+    e(next(&mut tracer, Flags::STOP_SINGLESTEP))?;
     let regs = e(tracer.regs.get_int())?;
 
     unsafe {
@@ -273,11 +284,11 @@ pub fn ptrace() -> Result<(), String> {
         assert_eq!(e(tracer.mem.cursor())? as usize, regs.rsp + out.bytes.len());
     }
 
-    e(tracer.next(Stop::INSTRUCTION))?;
+    e(next(&mut tracer, Flags::STOP_SINGLESTEP))?;
 
     println!("Testing floating point...");
     for _ in 0..3 {
-        e(tracer.next(Stop::INSTRUCTION))?;
+        e(next(&mut tracer, Flags::STOP_SINGLESTEP))?;
     }
     let regs = e(tracer.regs.get_float())?;
     let f = regs.st_space_nth(0);
@@ -286,74 +297,72 @@ pub fn ptrace() -> Result<(), String> {
     assert!((f - 5.65685424949238).abs() < std::f64::EPSILON);
 
     println!("Testing fork event");
-    assert!(e(tracer.next_event(Stop::SYSCALL))?.is_none()); // pre-syscall
-    let mut handler = e(tracer.next_event(Stop::SYSCALL))?.ok_or("Syscall completed without yielding fork event")?; // post-syscall
-    let events = e(handler.iter().collect::<io::Result<Vec<_>>>())?;
+    e(next(&mut tracer, Flags::STOP_PRE_SYSCALL | Flags::EVENT_CLONE))?;
+    let mut handler = e(tracer.next_event(Flags::STOP_POST_SYSCALL | Flags::EVENT_CLONE))?;
 
-    assert_eq!(events.len(), 1);
-    match events[0] {
-        PtraceEvent::Clone(pid) => println!("Obtained fork (PID {})", pid),
+    let event = e(e(handler.pop_one())?.ok_or("Expected event but none occured"))?;
+    match event.data {
+        EventData::EventClone(pid) => println!("Obtained fork (PID {})", pid),
         ref e => return Err(format!("Wrong event type: {:?}", e))
     }
-    assert!(e(handler.retry())?.is_none());
+
+    e(handler.retry())?;
+    let event = e(e(handler.pop_one())?.ok_or("Expected event but none occured"))?;
+    assert_eq!(event.cause, Flags::STOP_POST_SYSCALL);
 
     println!("Testing fork event - but actually handling the fork");
-    for _ in 0..3 { // pre-post-waitpid, pre-clone
-        assert!(e(tracer.next_event(Stop::SYSCALL))?.is_none());
-    }
-    let mut handler = e(tracer.next_event(Stop::SYSCALL))?.ok_or("Syscall completed without yielding fork event")?;
-    // handler = e(handler.retry())?.ok_or("Program completed without yielding fork event")?;
-    let events = e(handler.iter().collect::<io::Result<Vec<_>>>())?;
-    assert_eq!(events.len(), 1);
-    match events[0] {
-        PtraceEvent::Clone(pid) => {
+    assert_eq!(e(e(next(&mut tracer, Flags::STOP_PRE_SYSCALL | Flags::EVENT_CLONE))?.regs.get_int())?.rax, syscall::SYS_WAITPID);
+    e(next(&mut tracer, Flags::STOP_POST_SYSCALL))?;
+    assert_eq!(e(e(next(&mut tracer, Flags::STOP_PRE_SYSCALL))?.regs.get_int())?.rax, syscall::SYS_CLONE);
+    let mut handler = e(tracer.next_event(Flags::STOP_PRE_SYSCALL | Flags::EVENT_CLONE))?;
+
+    let event = e(e(handler.pop_one())?.ok_or("Expected event but none occured"))?;
+    match event.data {
+        EventData::EventClone(pid) => {
             let mut child = e(Tracer::attach(pid))?;
             println!("-> Fork attached (PID {})", pid);
 
-            assert_eq!(e(e(child.next(Stop::SYSCALL))?.regs.get_int())?.rax, syscall::SYS_GETPID);
-            e(child.next(Stop::SYSCALL))?;
+            assert_eq!(e(e(next(&mut child, Flags::STOP_PRE_SYSCALL))?.regs.get_int())?.rax, syscall::SYS_GETPID);
+            e(child.next(Flags::STOP_POST_SYSCALL))?;
             println!("-> Fork executed GETPID");
 
-            assert_eq!(e(e(child.next(Stop::SYSCALL))?.regs.get_int())?.rax, syscall::SYS_EXIT);
-            assert_eq!(child.next(Stop::COMPLETION).unwrap_err().raw_os_error(), Some(syscall::ESRCH));
+            assert_eq!(e(e(next(&mut child, Flags::STOP_PRE_SYSCALL))?.regs.get_int())?.rax, syscall::SYS_EXIT);
+            assert_eq!(child.next(Flags::empty()).unwrap_err().raw_os_error(), Some(syscall::ESRCH));
             println!("-> Fork executed EXIT");
         },
         ref e => return Err(format!("Wrong event type: {:?}", e))
     }
-    assert!(e(handler.retry())?.is_none());
+    e(handler.retry())?;
+    e(e(handler.pop_one())?.ok_or("Expected event but none occured"))?;
 
     println!("Testing signals");
-    assert_eq!(e(e(tracer.next(Stop::SYSCALL))?.regs.get_int())?.rax, syscall::SYS_SIGACTION);
-    e(tracer.next(Stop::SYSCALL))?; // post-syscall sigaction
-    assert_eq!(e(e(tracer.next(Stop::SYSCALL))?.regs.get_int())?.rax, syscall::SYS_GETPID);
-    e(tracer.next(Stop::SYSCALL))?; // post-syscall getpid
-    assert_eq!(e(e(tracer.next(Stop::SYSCALL))?.regs.get_int())?.rax, syscall::SYS_KILL);
-    // kill doesn't return *yet*
+    assert_eq!(e(tracer.regs.get_int())?.rax, syscall::SYS_SIGACTION);
+    e(next(&mut tracer, Flags::STOP_POST_SYSCALL))?;
+    assert_eq!(e(e(next(&mut tracer, Flags::STOP_PRE_SYSCALL))?.regs.get_int())?.rax, syscall::SYS_GETPID);
+    e(next(&mut tracer, Flags::STOP_POST_SYSCALL))?;
+    assert_eq!(e(e(next(&mut tracer, Flags::STOP_PRE_SYSCALL))?.regs.get_int())?.rax, syscall::SYS_KILL);
 
-    let mut handler = e(tracer.next_event(Stop::SYSCALL))?.ok_or("Syscall completed without yielding  event")?;
-    let events = e(handler.iter().collect::<io::Result<Vec<_>>>())?;
+    let event = e(tracer.next(Flags::STOP_PRE_SYSCALL | Flags::STOP_SIGNAL))?;
 
-    assert_eq!(events.len(), 1);
-    match events[0] {
-        PtraceEvent::Signal(signal) => {
+    assert_eq!(event.cause, Flags::STOP_SIGNAL);
+    match event.data {
+        EventData::StopSignal(signal, handler) => {
             assert_eq!(signal, syscall::SIGUSR1);
-            println!("Obtained signal");
+            assert_ne!(handler, syscall::SIG_DFL);
+            assert_ne!(handler, syscall::SIG_IGN);
         },
         ref e => return Err(format!("Wrong event type: {:?}", e))
     }
 
-    assert!(e(handler.retry())?.is_none());
     for i in 0..2 {
-        assert_eq!(e(tracer.regs.get_int())?.rax, syscall::SYS_YIELD);
-        e(tracer.next(Stop::SYSCALL))?; // post-syscall yield
-        assert_eq!(e(e(tracer.next(Stop::SYSCALL))?.regs.get_int())?.rax, syscall::SYS_SIGRETURN);
+        assert_eq!(e(e(next(&mut tracer, Flags::STOP_PRE_SYSCALL))?.regs.get_int())?.rax, syscall::SYS_YIELD);
+        e(next(&mut tracer, Flags::STOP_POST_SYSCALL))?;
+        assert_eq!(e(e(next(&mut tracer, Flags::STOP_PRE_SYSCALL))?.regs.get_int())?.rax, syscall::SYS_SIGRETURN);
         // sigreturn doesn't return
-        e(tracer.next(Stop::SYSCALL))?; // post-syscall kill!
+        e(next(&mut tracer, Flags::STOP_POST_SYSCALL))?; // post-syscall kill!
 
         if i == 0 {
-            e(tracer.next(Stop::SIGNAL))?;
-            assert_eq!(e(tracer.regs.get_int())?.rax, syscall::SYS_KILL);
-            e(tracer.next(Stop::SYSCALL))?;
+            assert_eq!(e(e(next(&mut tracer, Flags::STOP_SIGNAL))?.regs.get_int())?.rax, syscall::SYS_KILL);
         }
     }
 
@@ -361,15 +370,15 @@ pub fn ptrace() -> Result<(), String> {
     let mut tracer = e(tracer.nonblocking())?;
 
     println!("Testing behavior of obsolete breakpoints...");
-    e(tracer.next(Stop::SYSCALL))?;
-    e(tracer.next(Stop::COMPLETION))?;
+    e(tracer.next(Flags::STOP_PRE_SYSCALL | Flags::STOP_POST_SYSCALL))?;
+    e(tracer.next(Flags::empty()))?;
     println!("Tracee RAX: {}", e(tracer.regs.get_int())?.rax);
 
     println!("Waiting for next signal from tracee that it's ready to be traced again...");
     e(syscall::waitpid(pid, &mut status, syscall::WUNTRACED))?;
 
     println!("Setting sysemu breakpoint...");
-    e(tracer.next(Stop::SYSCALL | Stop::SYSEMU))?;
+    e(tracer.next(Flags::STOP_PRE_SYSCALL))?;
 
     println!("Schedule restart of process after breakpoint is set...");
     e(syscall::kill(pid, syscall::SIGCONT))?;
@@ -381,7 +390,8 @@ pub fn ptrace() -> Result<(), String> {
 
     println!("Waiting... Five times... To make sure it doesn't get stuck forever...");
     for _ in 0..5 {
-        e(tracer.wait())?;
+        e(tracer.next(Flags::FLAG_WAIT))?;
+        tracer.events().for_each(|_| ());
     }
 
     println!("Overriding GETPID call...");
@@ -393,11 +403,11 @@ pub fn ptrace() -> Result<(), String> {
     let mut tracer = e(tracer.blocking())?;
 
     println!("Checking exit syscall...");
-    e(tracer.next(Stop::SYSCALL))?;
+    e(next(&mut tracer, Flags::STOP_PRE_SYSCALL | Flags::FLAG_SYSEMU))?;
     let regs = e(tracer.regs.get_int())?;
     assert_eq!(regs.rax, syscall::SYS_EXIT);
     assert_eq!(regs.rdi, 123);
-    assert_eq!(tracer.next(Stop::SYSCALL).unwrap_err().raw_os_error(), Some(syscall::ESRCH));
+    assert_eq!(next(&mut tracer, Flags::STOP_POST_SYSCALL).unwrap_err().raw_os_error(), Some(syscall::ESRCH));
 
     println!("Checking exit status (waitpid nohang)...");
     let mut status = 0;
