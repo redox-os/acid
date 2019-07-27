@@ -64,7 +64,7 @@ pub fn ptrace() -> Result<(), String> {
     };
     use strace::*;
 
-    let pid = e(unsafe { syscall::clone(0) })?;
+    let pid = e(unsafe { syscall::clone(syscall::CloneFlags::empty()) })?;
     if pid == 0 {
         extern "C" fn sighandler(_: usize) {
             unsafe {
@@ -391,7 +391,7 @@ pub fn ptrace() -> Result<(), String> {
     println!("Waiting... Five times... To make sure it doesn't get stuck forever...");
     for _ in 0..5 {
         e(tracer.next(Flags::FLAG_WAIT))?;
-        tracer.events().for_each(|_| ());
+        e(tracer.events())?.for_each(|_| ());
     }
 
     println!("Overriding GETPID call...");
