@@ -170,8 +170,14 @@ pub fn ptrace() -> Result<(), String> {
                 mov rsi, 10 // SIGUSR1
                 syscall
 
-                // aaand again
+                // and again
                 mov rax, 37 // SYS_KILL
+                syscall
+                // aaaaand yet again...
+                mov rax, 37 // SYS_KILL
+                syscall
+
+                mov rax, 158 // SYS_KILL
                 syscall
 
                 // Test behavior if tracer aborts a breakpoint before it's reached
@@ -366,6 +372,11 @@ pub fn ptrace() -> Result<(), String> {
         }
     }
 
+    println!("Testing ignoring signals");
+    assert_eq!(e(e(next(&mut tracer, Flags::STOP_SIGNAL))?.regs.get_int())?.rax, syscall::SYS_KILL);
+    assert_eq!(e(e(next(&mut tracer, Flags::FLAG_IGNORE | Flags::STOP_PRE_SYSCALL))?.regs.get_int())?.rax, syscall::SYS_YIELD);
+    assert_eq!(e(e(next(&mut tracer, Flags::STOP_POST_SYSCALL))?.regs.get_int())?.rax, 0);
+
     // Activate nonblock
     let mut tracer = e(tracer.nonblocking())?;
 
@@ -403,7 +414,7 @@ pub fn ptrace() -> Result<(), String> {
     let mut tracer = e(tracer.blocking())?;
 
     println!("Checking exit syscall...");
-    e(next(&mut tracer, Flags::STOP_PRE_SYSCALL | Flags::FLAG_SYSEMU))?;
+    e(next(&mut tracer, Flags::STOP_PRE_SYSCALL | Flags::FLAG_IGNORE))?;
     let regs = e(tracer.regs.get_int())?;
     assert_eq!(regs.rax, syscall::SYS_EXIT);
     assert_eq!(regs.rdi, 123);
