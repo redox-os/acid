@@ -176,8 +176,10 @@ pub fn ptrace() -> Result<(), String> {
                 // aaaaand yet again...
                 mov rax, 37 // SYS_KILL
                 syscall
+                // test int3
+                int3
 
-                mov rax, 158 // SYS_KILL
+                mov rax, 200 // SYS_GETGID
                 syscall
 
                 // Test behavior if tracer aborts a breakpoint before it's reached
@@ -372,10 +374,20 @@ pub fn ptrace() -> Result<(), String> {
         }
     }
 
-    println!("Testing ignoring signals");
-    assert_eq!(e(e(next(&mut tracer, Flags::STOP_SIGNAL))?.regs.get_int())?.rax, syscall::SYS_KILL);
-    assert_eq!(e(e(next(&mut tracer, Flags::FLAG_IGNORE | Flags::STOP_PRE_SYSCALL))?.regs.get_int())?.rax, syscall::SYS_YIELD);
-    assert_eq!(e(e(next(&mut tracer, Flags::STOP_POST_SYSCALL))?.regs.get_int())?.rax, 0);
+    println!("Test ignoring signal");
+    let event = e(tracer.next(Flags::STOP_SIGNAL | Flags::STOP_POST_SYSCALL))?;
+    assert_eq!(e(tracer.regs.get_int())?.rax, syscall::SYS_KILL);
+    assert_eq!(event.cause, Flags::STOP_SIGNAL);
+    match event.data {
+        EventData::StopSignal(signal, _) => assert_eq!(signal, syscall::SIGUSR1),
+        ref e => return Err(format!("Wrong event type: {:?}", e))
+    }
+
+    println!("Test ignoring int3");
+    let event = e(tracer.next(Flags::FLAG_IGNORE | Flags::STOP_BREAKPOINT))?;
+    assert_eq!(event.cause, Flags::STOP_BREAKPOINT);
+    assert_eq!(e(e(next(&mut tracer, Flags::FLAG_IGNORE | Flags::STOP_PRE_SYSCALL))?.regs.get_int())?.rax, syscall::SYS_GETGID);
+    e(next(&mut tracer, Flags::STOP_POST_SYSCALL))?;
 
     // Activate nonblock
     let mut tracer = e(tracer.nonblocking())?;
