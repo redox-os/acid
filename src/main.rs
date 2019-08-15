@@ -426,13 +426,26 @@ pub fn ptrace() -> Result<(), String> {
     let mut tracer = e(tracer.blocking())?;
 
     println!("Checking exit syscall...");
-    e(next(&mut tracer, Flags::STOP_PRE_SYSCALL | Flags::FLAG_IGNORE))?;
+    e(next(&mut tracer, Flags::STOP_PRE_SYSCALL | Flags::STOP_EXIT | Flags::FLAG_IGNORE))?;
     let regs = e(tracer.regs.get_int())?;
     assert_eq!(regs.rax, syscall::SYS_EXIT);
     assert_eq!(regs.rdi, 123);
-    assert_eq!(next(&mut tracer, Flags::STOP_POST_SYSCALL).unwrap_err().raw_os_error(), Some(syscall::ESRCH));
+
+    println!("Checking exit breakpoint...");
+    let event = e(tracer.next(Flags::STOP_POST_SYSCALL | Flags::STOP_EXIT))?;
+
+    assert_eq!(event.cause, Flags::STOP_EXIT);
+    match event.data {
+        EventData::StopExit(status) => {
+            assert!(syscall::wifexited(status));
+            assert_eq!(syscall::wexitstatus(status), 123);
+        },
+        ref e => return Err(format!("Wrong event type: {:?}", e))
+    }
 
     println!("Checking exit status (waitpid nohang)...");
+    assert_eq!(next(&mut tracer, Flags::STOP_POST_SYSCALL | Flags::STOP_EXIT).unwrap_err().raw_os_error(), Some(syscall::ESRCH));
+
     let mut status = 0;
     e(syscall::waitpid(pid, &mut status, syscall::WNOHANG))?;
     assert!(syscall::wifexited(status));
