@@ -317,18 +317,22 @@ pub fn ptrace() -> Result<(), String> {
     assert!((f - 5.65685424949238).abs() < std::f64::EPSILON);
 
     println!("Testing fork event");
-    e(next(&mut tracer, Flags::STOP_PRE_SYSCALL | Flags::EVENT_CLONE))?;
+    assert_eq!(e(e(next(&mut tracer, Flags::STOP_PRE_SYSCALL | Flags::EVENT_CLONE))?.regs.get_int())?.rax, syscall::SYS_CLONE);
     let mut handler = e(tracer.next_event(Flags::STOP_POST_SYSCALL | Flags::EVENT_CLONE))?;
 
     let event = e(e(handler.pop_one())?.ok_or("Expected event but none occured"))?;
-    match event.data {
-        EventData::EventClone(pid) => println!("Obtained fork (PID {})", pid),
+    let clone_pid = match event.data {
+        EventData::EventClone(pid) => {
+            println!("Obtained fork (PID {})", pid);
+            pid
+        },
         ref e => return Err(format!("Wrong event type: {:?}", e))
-    }
+    };
 
     e(handler.retry())?;
     let event = e(e(handler.pop_one())?.ok_or("Expected event but none occured"))?;
     assert_eq!(event.cause, Flags::STOP_POST_SYSCALL);
+    assert_eq!(e(tracer.regs.get_int())?.rax, clone_pid);
 
     println!("Testing fork event - but actually handling the fork");
     assert_eq!(e(e(next(&mut tracer, Flags::STOP_PRE_SYSCALL | Flags::EVENT_CLONE))?.regs.get_int())?.rax, syscall::SYS_WAITPID);
