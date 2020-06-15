@@ -58,7 +58,10 @@ pub fn ptrace() -> Result<(), String> {
         fs::{File, OpenOptions},
         io,
         mem,
-        os::unix::io::{AsRawFd, FromRawFd, RawFd},
+        os::unix::{
+            fs::OpenOptionsExt,
+            io::{AsRawFd, FromRawFd, RawFd},
+        },
         thread,
         time::Duration,
     };
@@ -230,11 +233,20 @@ pub fn ptrace() -> Result<(), String> {
     let mut status = 0;
     e(syscall::waitpid(pid, &mut status, syscall::WUNTRACED))?;
 
+    println!("The process is stopped, of course, so it shouldn't mind if we sleep here");
+    thread::sleep(Duration::from_secs(1));
+
     println!("Done! Attaching tracer...");
 
     // Stop and attach process + get handle to registers. This also
     // tests the behavior of dup(...)
-    let proc_file = e(OpenOptions::new().read(true).write(true).truncate(true).open(format!("proc:{}/trace", pid)))?;
+    let proc_file = e(
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .truncate(true)
+            .custom_flags(syscall::O_EXCL as i32)
+            .open(format!("proc:{}/trace", pid)))?;
     let regs_file = unsafe {
         File::from_raw_fd(e(syscall::dup(proc_file.as_raw_fd() as usize, b"regs/int"))? as RawFd)
     };
