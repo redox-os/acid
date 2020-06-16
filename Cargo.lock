@@ -5,7 +5,7 @@ name = "acid"
 version = "0.1.0"
 dependencies = [
  "redox_syscall 0.1.56 (git+https://gitlab.redox-os.org/redox-os/syscall.git)",
- "strace 0.1.0",
+ "strace 0.1.0 (git+https://gitlab.redox-os.org/redox-os/strace-redox)",
  "x86 0.7.2 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -241,6 +241,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "strace"
 version = "0.1.0"
+source = "git+https://gitlab.redox-os.org/redox-os/strace-redox#d7f7921f50bb03fe855f27a439d2d9c2eac45646"
 dependencies = [
  "bitflags 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "redox_syscall 0.1.56 (git+https://gitlab.redox-os.org/redox-os/syscall.git)",
@@ -307,6 +308,7 @@ dependencies = [
 "checksum serde 0.6.15 (registry+https://github.com/rust-lang/crates.io-index)" = "c97b18e9e53de541f11e497357d6c5eaeb39f0cb9c8734e274abe4935f6991fa"
 "checksum serde_json 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)" = "b5aaee47e038bf9552d30380d3973fff2593ee0a76d81ad4c581f267cdcadf36"
 "checksum siphasher 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)" = "0b8de496cf83d4ed58b6be86c3a275b8602f6ffe98d3024a869e124147a9a3ac"
+"checksum strace 0.1.0 (git+https://gitlab.redox-os.org/redox-os/strace-redox)" = "<none>"
 "checksum winapi 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)" = "92c1eb33641e276cfa214a0522acad57be5c56b10cb348b3c5117db75f3ac4b0"
 "checksum winapi-i686-pc-windows-gnu 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6"
 "checksum winapi-x86_64-pc-windows-gnu 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
