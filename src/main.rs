@@ -56,7 +56,7 @@ fn page_fault_test() -> Result<(), String> {
 pub fn ptrace() -> Result<(), String> {
     use std::{
         fs::{File, OpenOptions},
-        io,
+        io::{self, prelude::*},
         mem,
         os::unix::{
             fs::OpenOptionsExt,
@@ -329,7 +329,6 @@ pub fn ptrace() -> Result<(), String> {
         ref e => return Err(format!("Wrong event type: {:?}", e))
     };
 
-    e(handler.retry())?;
     let event = e(e(handler.pop_one())?.ok_or("Expected event but none occured"))?;
     assert_eq!(event.cause, Flags::STOP_POST_SYSCALL);
     assert_eq!(e(tracer.regs.get_int())?.rax, clone_pid);
@@ -356,7 +355,6 @@ pub fn ptrace() -> Result<(), String> {
         },
         ref e => return Err(format!("Wrong event type: {:?}", e))
     }
-    e(handler.retry())?;
     e(e(handler.pop_one())?.ok_or("Expected event but none occured"))?;
 
     println!("Testing signals");
@@ -411,10 +409,22 @@ pub fn ptrace() -> Result<(), String> {
     println!("Testing behavior of obsolete breakpoints...");
     e(tracer.next(Flags::STOP_PRE_SYSCALL | Flags::STOP_POST_SYSCALL))?;
     e(tracer.next(Flags::empty()))?;
+
+    // also, we're nonblocking, can't wait for next event like that
+    assert_eq!(e(tracer.events())?.next().unwrap().unwrap_err().kind(), io::ErrorKind::WouldBlock);
+
     println!("Tracee RAX: {}", e(tracer.regs.get_int())?.rax);
 
     println!("Waiting for next signal from tracee that it's ready to be traced again...");
     e(syscall::waitpid(pid, &mut status, syscall::WUNTRACED))?;
+
+    println!("Preparing event scheme");
+    let mut eventfd = e(File::open("event:"))?;
+    e(eventfd.write(&syscall::Event {
+        id: tracer.file.as_raw_fd() as usize,
+        flags: syscall::EVENT_READ,
+        data: 0,
+    }))?;
 
     println!("Setting sysemu breakpoint...");
     e(tracer.next(Flags::STOP_PRE_SYSCALL))?;
@@ -427,11 +437,13 @@ pub fn ptrace() -> Result<(), String> {
         println!("Tracee RAX: {}", e(tracer.regs.get_int())?.rax);
     }
 
-    println!("Waiting... Five times... To make sure it doesn't get stuck forever...");
-    for _ in 0..5 {
-        e(tracer.next(Flags::FLAG_WAIT))?;
-        e(tracer.events())?.for_each(|_| ());
-    }
+    println!("Waiting using event scheme");
+    let mut event = syscall::Event::default();
+    e(eventfd.read(&mut event))?;
+
+    println!("Consuming events");
+
+    e(tracer.events())?.for_each(|_| ());
 
     println!("Overriding GETPID call...");
     let mut regs = e(tracer.regs.get_int())?;
