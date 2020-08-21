@@ -1,5 +1,5 @@
 //!Acid testing program
-#![feature(thread_local, asm)]
+#![feature(thread_local, llvm_asm)]
 
 fn e<T, E: ToString>(error: Result<T, E>) -> Result<T, String> {
     error.map_err(|e| e.to_string())
@@ -71,7 +71,7 @@ pub fn ptrace() -> Result<(), String> {
     if pid == 0 {
         extern "C" fn sighandler(_: usize) {
             unsafe {
-                asm!("
+                llvm_asm!("
                     mov rax, 158 // SYS_YIELD
                     syscall
                 "
@@ -80,7 +80,7 @@ pub fn ptrace() -> Result<(), String> {
         }
         extern "C" fn sigreturn() {
             unsafe {
-                asm!("
+                llvm_asm!("
                     mov rax, 119 // SYS_SIGRETURN
                     syscall
                     ud2
@@ -89,7 +89,7 @@ pub fn ptrace() -> Result<(), String> {
             }
         }
         unsafe {
-            asm!("
+            llvm_asm!("
                 // Push any arguments from rust to the stack so we're
                 // free to use whatever registers we want
                 push $1
