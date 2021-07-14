@@ -4,42 +4,50 @@
 name = "acid"
 version = "0.1.0"
 dependencies = [
- "redox_syscall 0.2.0 (git+https://gitlab.redox-os.org/redox-os/syscall.git)",
+ "redox_syscall 0.2.9 (git+https://gitlab.redox-os.org/redox-os/syscall.git)",
  "strace 0.1.0 (git+https://gitlab.redox-os.org/redox-os/strace-redox)",
  "x86 0.34.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "bit_field"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "bitflags"
-version = "1.1.0"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "cc"
-version = "1.0.59"
+version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "raw-cpuid"
-version = "8.1.1"
+version = "8.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
- "bitflags 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "cc 1.0.59 (registry+https://github.com/rust-lang/crates.io-index)",
+ "bitflags 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "cc 1.0.69 (registry+https://github.com/rust-lang/crates.io-index)",
  "rustc_version 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "redox_syscall"
-version = "0.2.0"
-source = "git+https://gitlab.redox-os.org/redox-os/syscall.git#405964e4fb9d6e920d04226d60987ab4c7e70b85"
+version = "0.2.9"
+source = "git+https://gitlab.redox-os.org/redox-os/syscall.git#841b5f42216782ce2aee6201c55b849ce5d7ab71"
 dependencies = [
- "bitflags 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "bitflags 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "redox_syscall"
+version = "0.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "bitflags 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -66,10 +74,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "strace"
 version = "0.1.0"
-source = "git+https://gitlab.redox-os.org/redox-os/strace-redox#d7f7921f50bb03fe855f27a439d2d9c2eac45646"
+source = "git+https://gitlab.redox-os.org/redox-os/strace-redox#a2a6e95e8d3be09cd761feaa39cf051de4f45639"
 dependencies = [
- "bitflags 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "redox_syscall 0.2.0 (git+https://gitlab.redox-os.org/redox-os/syscall.git)",
+ "bitflags 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "redox_syscall 0.2.9 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -77,17 +85,18 @@ name = "x86"
 version = "0.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
- "bit_field 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "bitflags 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "raw-cpuid 8.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "bit_field 0.10.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "bitflags 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "raw-cpuid 8.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [metadata]
-"checksum bit_field 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)" = "a165d606cf084741d4ac3a28fb6e9b1eb0bd31f6cd999098cfddb0b2ab381dc0"
-"checksum bitflags 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3d155346769a6855b86399e9bc3814ab343cd3d62c7e985113d46a0ec3c281fd"
-"checksum cc 1.0.59 (registry+https://github.com/rust-lang/crates.io-index)" = "66120af515773fb005778dc07c261bd201ec8ce50bd6e7144c927753fe013381"
-"checksum raw-cpuid 8.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "0cee2c7710d96f9f90f56824fca5438b301dc0fb49ece4cf9dfa044e54067e10"
-"checksum redox_syscall 0.2.0 (git+https://gitlab.redox-os.org/redox-os/syscall.git)" = "<none>"
+"checksum bit_field 0.10.1 (registry+https://github.com/rust-lang/crates.io-index)" = "dcb6dd1c2376d2e096796e234a70e17e94cc2d5d54ff8ce42b28cef1d0d359a4"
+"checksum bitflags 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "cf1de2fe8c75bc145a2f577add951f8134889b4795d47466a54a5c846d691693"
+"checksum cc 1.0.69 (registry+https://github.com/rust-lang/crates.io-index)" = "e70cc2f62c6ce1868963827bd677764c62d07c3d9a3e1fb1177ee1a9ab199eb2"
+"checksum raw-cpuid 8.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "1fdf7d9dbd43f3d81d94a49c1c3df73cc2b3827995147e6cf7f89d4ec5483e73"
+"checksum redox_syscall 0.2.9 (git+https://gitlab.redox-os.org/redox-os/syscall.git)" = "<none>"
+"checksum redox_syscall 0.2.9 (registry+https://github.com/rust-lang/crates.io-index)" = "5ab49abadf3f9e1c4bc499e8845e152ad87d2ad2d30371841171169e9d75feee"
 "checksum rustc_version 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)" = "138e3e0acb6c9fb258b19b67cb8abd63c00679d2851805ea151465464fe9030a"
 "checksum semver 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)" = "1d7eb9ef2c18661902cc47e535f9bc51b78acd254da71d375c2f6720d9a40403"
 "checksum semver-parser 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)" = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
