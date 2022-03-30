@@ -5,7 +5,7 @@ authors = ["Jeremy Soller <jackpot51@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-x86 = "0.34.0"
+x86 = "0.47.0"
 redox_syscall = { git = "https://gitlab.redox-os.org/redox-os/syscall.git" }
 strace = { git = "https://gitlab.redox-os.org/redox-os/strace-redox", default-features = false }
 #strace = { path = "../../strace/source", default-features = false }
