@@ -1,6 +1,8 @@
 //!Acid testing program
 #![feature(thread_local)]
 
+mod clone_grant_using_fmap;
+
 fn e<T, E: ToString>(error: Result<T, E>) -> Result<T, String> {
     error.map_err(|e| e.to_string())
 }
@@ -175,6 +177,8 @@ fn tls_test() -> Result<(), String> {
     Ok(())
 }
 
+use self::clone_grant_using_fmap::*;
+
 fn main() {
     use std::collections::BTreeMap;
     use std::{env, process};
@@ -187,6 +191,7 @@ fn main() {
     tests.insert("tcp_fin", tcp_fin_test);
     tests.insert("thread", thread_test);
     tests.insert("tls", tls_test);
+    tests.insert("clone_grant_using_fmap", clone_grant_using_fmap);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {
