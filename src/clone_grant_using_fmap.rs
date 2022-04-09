@@ -1,5 +1,5 @@
 use syscall::data::{Map, Packet};
-use syscall::error::{Error, Result, EINVAL};
+use syscall::error::{Error, Result, EFAULT, EINVAL};
 use syscall::flag::{CloneFlags, MapFlags, O_CREAT, O_RDONLY, O_RDWR, O_CLOEXEC, WaitFlags};
 use syscall::scheme::SchemeMut;
 
@@ -134,14 +134,27 @@ fn inner(readonly: bool) -> Result<()> {
     unsafe {
         pid = syscall::clone(CloneFlags::empty())?;
 
+        // Keep in mind these two constants may disappear in the near future.
+        const PML4_SIZE: usize = 0x0000_0080_0000_0000;
+        const USER_TMP_GRANT_OFFSET: usize = 7 * PML4_SIZE;
+        const USER_GRANT_OFFSET: usize = 2 * PML4_SIZE;
+
+        assert!((ptr as usize) >= USER_GRANT_OFFSET);
+        assert!((ptr as usize) <= USER_TMP_GRANT_OFFSET);
+
+        // Make sure the temporary addresses are not left after the kernel has cloned.
+        assert_eq!(syscall::virttophys((ptr as usize) - USER_GRANT_OFFSET + USER_TMP_GRANT_OFFSET), Err(Error::new(EFAULT)));
+        println!("Old memory was correctly unmapped, for the {} process", if pid == 0 { "child" } else { "parent" });
+
         if pid == 0 {
             println!("Child process: checking...");
+
             // We are the child process. Hopefully the kernel copied the grant properly and without
             // aliasing.
             if readonly {
                 assert_eq!(ptr.read_volatile(), 42);
             } else {
-                assert_eq!(ptr.read_volatile(), 0x42);
+                assert_eq!(ptr.read_volatile(), 0);
                 ptr.write_volatile(0x43);
                 assert_eq!(ptr.read_volatile(), 0x43);
             }
