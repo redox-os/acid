@@ -1,5 +1,5 @@
 //!Acid testing program
-#![feature(thread_local)]
+#![feature(core_intrinsics, thread_local)]
 
 mod clone_grant_using_fmap;
 
@@ -45,12 +45,71 @@ fn create_test() -> Result<(), String> {
     Ok(())
 }
 
-fn page_fault_test() -> Result<(), String> {
-    use std::thread;
+#[cfg(target_arch = "x86_64")]
+const PAGE_SIZE: usize = 4096;
 
-    thread::spawn(|| {
-        println!("{:X}", unsafe { *(0xDEADC0DE as *const u8) });
-    }).join().unwrap();
+fn page_fault_test() -> Result<(), String> {
+    use std::sync::atomic::{AtomicUsize, compiler_fence, Ordering};
+
+    use syscall::flag::{MapFlags, SigActionFlags, SIGSEGV};
+    use syscall::data::{Map, SigAction};
+
+    const ADDR: usize = 0xDEADC0DE;
+    const ALIGNED_ADDR: usize = ADDR / PAGE_SIZE * PAGE_SIZE;
+    static STATE: AtomicUsize = AtomicUsize::new(0);
+
+    fn map(value: u8) {
+        unsafe {
+            let _ = syscall::fmap(!0, &Map { offset: 0, address: ALIGNED_ADDR, size: PAGE_SIZE, flags: MapFlags::MAP_FIXED_NOREPLACE | MapFlags::MAP_PRIVATE | MapFlags::PROT_READ | MapFlags::PROT_WRITE }).expect("[signal handler]: failed to re-map address");
+            (ADDR as *mut u8).write_volatile(value);
+        }
+    }
+    extern "C" fn page_fault_handler(_signo: usize) {
+        std::panic::catch_unwind(|| {
+            let prev_state = STATE.fetch_add(1, Ordering::Relaxed);
+            compiler_fence(Ordering::SeqCst);
+
+            match prev_state {
+                0 => {
+                    println!("[signal handler]: Mapping to fix page fault...");
+                    map(42);
+                }
+                1 => {
+                    println!("[signal handler]: Remapping to finish main process...");
+                    map(43);
+                }
+                _ => unreachable!("[signal handler]: Page fault should NOT occur more than twice! What went wrong?"),
+            }
+
+            syscall::sigreturn().expect("[signal handler]: expected sigreturn to work")
+        }).unwrap_or_else(|_| std::intrinsics::abort());
+    }
+
+    let new_sigaction = SigAction {
+        sa_handler: Some(page_fault_handler),
+        // I think this is currently ignored by the kernel. TODO
+        sa_mask: [0; 2],
+        sa_flags: SigActionFlags::empty(),
+    };
+    syscall::sigaction(SIGSEGV, Some(&new_sigaction), None).map_err(|err| format!("{}", err))?;
+
+    for i in 0..2 {
+        println!("Reading {} time:", if i == 0 { "first" } else if i == 1 { "second" } else { unreachable!() });
+        println!("value {}", unsafe { (ADDR as *const u8).read_volatile() });
+        if i == 0 {
+            println!("Unmapping to test TLB flush...");
+        }
+        let _ = unsafe { syscall::funmap(ALIGNED_ADDR, PAGE_SIZE).expect("failed to unmap") };
+    }
+
+    compiler_fence(Ordering::SeqCst);
+    match STATE.load(Ordering::Relaxed) {
+        0 => panic!("failed: no page fault was caught, maybe 0xDEADC0DE was already mapped?"),
+        1 => panic!("failed: unmap was unsuccessful"),
+        2 => (),
+
+        _ => unreachable!(),
+    }
 
     Ok(())
 }
