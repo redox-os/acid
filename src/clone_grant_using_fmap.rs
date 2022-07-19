@@ -1,3 +1,5 @@
+// TODO: This is no longer implemented by the kernel. Should it be moved to resist?
+
 use syscall::data::{Map, Packet};
 use syscall::error::{Error, Result, EFAULT, EINVAL};
 use syscall::flag::{CloneFlags, MapFlags, O_CREAT, O_RDONLY, O_RDWR, O_CLOEXEC, WaitFlags};
@@ -28,7 +30,9 @@ impl Daemon {
 
         let [read_pipe, write_pipe] = pipes;
 
-        if unsafe { clone(CloneFlags::empty())? } == 0 {
+        let result = unsafe { libc::fork() };
+
+        if result == 0 {
             let _ = close(read_pipe);
 
             f(Daemon {
@@ -36,7 +40,7 @@ impl Daemon {
             });
             // TODO: Replace Infallible with the never type once it is stabilized.
             unreachable!();
-        } else {
+        } else if result > 0 {
             let _ = close(write_pipe);
 
             let mut data = [0];
@@ -50,6 +54,8 @@ impl Daemon {
             } else {
                 Err(Error::new(EIO))
             }
+        } else {
+            return Err(Error::new(std::io::Error::last_os_error().raw_os_error().unwrap_or(EINVAL)));
         }
     }
 
@@ -132,24 +138,16 @@ fn inner(readonly: bool) -> Result<()> {
 
     let pid;
     unsafe {
-        pid = syscall::clone(CloneFlags::empty())?;
+        pid = libc::fork() as usize;
 
-        // Keep in mind these two constants may disappear in the near future.
-        const PML4_SIZE: usize = 0x0000_0080_0000_0000;
-        const USER_TMP_GRANT_OFFSET: usize = 7 * PML4_SIZE;
-        const USER_GRANT_OFFSET: usize = 2 * PML4_SIZE;
+        assert_ne!(pid, (-1_isize) as usize);
 
-        assert!((ptr as usize) >= USER_GRANT_OFFSET);
-        assert!((ptr as usize) <= USER_TMP_GRANT_OFFSET);
-
-        // Make sure the temporary addresses are not left after the kernel has cloned.
-        assert_eq!(syscall::virttophys((ptr as usize) - USER_GRANT_OFFSET + USER_TMP_GRANT_OFFSET), Err(Error::new(EFAULT)));
-        println!("Old memory was correctly unmapped, for the {} process", if pid == 0 { "child" } else { "parent" });
+        println!("Fork was successful, for the {} process", if pid == 0 { "child" } else { "parent" });
 
         if pid == 0 {
             println!("Child process: checking...");
 
-            // We are the child process. Hopefully the kernel copied the grant properly and without
+            // We are the child process. Hopefully relibc copied the grant properly and without
             // aliasing.
             if readonly {
                 assert_eq!(ptr.read_volatile(), 42);
