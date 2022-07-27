@@ -1,5 +1,5 @@
 //!Acid testing program
-#![feature(core_intrinsics, thread_local)]
+#![feature(array_chunks, core_intrinsics, thread_local)]
 
 mod clone_grant_using_fmap;
 
@@ -251,6 +251,7 @@ fn main() {
     tests.insert("thread", thread_test);
     tests.insert("tls", tls_test);
     tests.insert("clone_grant_using_fmap", clone_grant_using_fmap);
+    tests.insert("check_clone_leak", check_clone_leak);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {

@@ -180,3 +180,74 @@ pub fn clone_grant_using_fmap() -> Result<(), String> {
     inner(true).map_err(|e| e.to_string())?;
     Ok(())
 }
+
+#[derive(Debug, Eq, PartialEq)]
+struct Perms { r: bool, w: bool, x: bool, b: bool }
+#[derive(Debug, Eq, PartialEq)]
+struct Mapping {
+    addr: usize,
+    len: usize,
+    offset: usize,
+    perms: Perms,
+}
+fn read_addr_space() -> Result<Box<[Mapping]>, String> {
+    use std::fs::File;
+    use std::io::{BufReader, prelude::*};
+
+    let mut mappings = Vec::new();
+
+    let mut buf = vec! [0_u8; 4096];
+    let mut file = File::open("thisproc:current/addrspace").map_err(|err| format!("failed to open current address space: {}", err))?;
+
+    loop {
+        const RECORD_SIZE: usize = 4 * std::mem::size_of::<usize>();
+        let read = file.read(&mut buf).map_err(|err| format!("failed to read from address space: {}", err))? / RECORD_SIZE;
+
+        for chunks in buf[..read].array_chunks::<RECORD_SIZE>() {
+            let mut nums = chunks.array_chunks::<{std::mem::size_of::<usize>()}>().copied().map(usize::from_ne_bytes);
+
+            mappings.push(Mapping {
+                addr: nums.next().unwrap(),
+                len: nums.next().unwrap(),
+                perms: {
+                    let raw = nums.next().unwrap();
+                    let flags = MapFlags::from_bits(raw & !0x8000_0000).unwrap();
+
+                    Perms {
+                        r: true,
+                        w: flags.contains(MapFlags::PROT_WRITE),
+                        x: flags.contains(MapFlags::PROT_EXEC),
+                        b: raw & 0x8000_0000 != 0,
+                    }
+                },
+                offset: nums.next().unwrap(),
+            });
+        }
+
+        if read < buf.len() { break }
+    }
+
+    Ok(mappings.into_boxed_slice())
+}
+
+// Exec is harder and more unreliable to check, but kernel debug looks good enough for now.
+pub fn check_clone_leak() -> Result<(), String> {
+    // TODO: Check sigaction?
+
+    let prev_addr_space = read_addr_space()?;
+
+    let prev_number = syscall::open("memory:", 0).map_err(|_| format!("failed to open dummy file descriptor 1st time"))?;
+    let _ = syscall::close(prev_number);
+
+    unsafe { libc::fork(); }
+
+    let next_addr_space = read_addr_space()?;
+
+    let next_number = syscall::open("memory:", 0).map_err(|_| format!("failed to open dummy file descriptor 2nd time"))?;
+    let _ = syscall::close(next_number);
+
+    assert_eq!(prev_number, next_number, "file descriptor leak");
+    assert_eq!(prev_addr_space, next_addr_space);
+
+    Ok(())
+}
