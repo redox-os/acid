@@ -3,6 +3,8 @@
 
 mod clone_grant_using_fmap;
 
+const PAGE_SIZE: usize = 4096;
+
 fn e<T, E: ToString>(error: Result<T, E>) -> Result<T, String> {
     error.map_err(|e| e.to_string())
 }
@@ -44,9 +46,6 @@ fn create_test() -> Result<(), String> {
 
     Ok(())
 }
-
-#[cfg(target_arch = "x86_64")]
-const PAGE_SIZE: usize = 4096;
 
 fn page_fault_test() -> Result<(), String> {
     use std::sync::atomic::{AtomicUsize, compiler_fence, Ordering};
@@ -114,6 +113,7 @@ fn page_fault_test() -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_arch = "x86_64")]
 fn switch_test() -> Result<(), String> {
     use std::thread;
     use x86::time::rdtscp;
@@ -246,6 +246,7 @@ fn main() {
     let mut tests: BTreeMap<&'static str, fn() -> Result<(), String>> = BTreeMap::new();
     tests.insert("create_test", create_test);
     tests.insert("page_fault", page_fault_test);
+    #[cfg(target_arch = "x86_64")]
     tests.insert("switch", switch_test);
     tests.insert("tcp_fin", tcp_fin_test);
     tests.insert("thread", thread_test);

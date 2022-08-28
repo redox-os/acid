@@ -7,6 +7,8 @@ edition = "2018"
 [dependencies]
 libc = "0.2"
 redox_syscall = { git = "https://gitlab.redox-os.org/redox-os/syscall.git" }
-strace = { git = "https://gitlab.redox-os.org/redox-os/strace-redox", default-features = false }
-x86 = "0.47.0"
+#strace = { git = "https://gitlab.redox-os.org/redox-os/strace-redox", default-features = false }
 #strace = { path = "../../strace/source", default-features = false }
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+x86 = "0.47.0"
