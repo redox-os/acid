@@ -1,8 +1,6 @@
 //!Acid testing program
 #![feature(array_chunks, core_intrinsics, thread_local)]
 
-mod clone_grant_using_fmap;
-
 const PAGE_SIZE: usize = 4096;
 
 fn e<T, E: ToString>(error: Result<T, E>) -> Result<T, String> {
@@ -208,7 +206,7 @@ fn thread_test() -> Result<(), String> {
 static mut TBSS_TEST_ZERO: usize = 0;
 /// Test of non-zero values in thread data.
 #[thread_local]
-static mut TDATA_TEST_NONZERO: usize = 0xFFFFFFFFFFFFFFFF;
+static mut TDATA_TEST_NONZERO: usize = usize::max_value();
 
 fn tls_test() -> Result<(), String> {
     use std::thread;
@@ -218,9 +216,9 @@ fn tls_test() -> Result<(), String> {
             assert_eq!(TBSS_TEST_ZERO, 0);
             TBSS_TEST_ZERO += 1;
             assert_eq!(TBSS_TEST_ZERO, 1);
-            assert_eq!(TDATA_TEST_NONZERO, 0xFFFFFFFFFFFFFFFF);
+            assert_eq!(TDATA_TEST_NONZERO, usize::max_value());
             TDATA_TEST_NONZERO -= 1;
-            assert_eq!(TDATA_TEST_NONZERO, 0xFFFFFFFFFFFFFFFE);
+            assert_eq!(TDATA_TEST_NONZERO, usize::max_value() - 1);
         }
     }).join().unwrap();
 
@@ -228,15 +226,13 @@ fn tls_test() -> Result<(), String> {
         assert_eq!(TBSS_TEST_ZERO, 0);
         TBSS_TEST_ZERO += 1;
         assert_eq!(TBSS_TEST_ZERO, 1);
-        assert_eq!(TDATA_TEST_NONZERO, 0xFFFFFFFFFFFFFFFF);
+        assert_eq!(TDATA_TEST_NONZERO, usize::max_value());
         TDATA_TEST_NONZERO -= 1;
-        assert_eq!(TDATA_TEST_NONZERO, 0xFFFFFFFFFFFFFFFE);
+        assert_eq!(TDATA_TEST_NONZERO, usize::max_value() - 1);
     }
 
     Ok(())
 }
-
-use self::clone_grant_using_fmap::*;
 
 fn main() {
     use std::collections::BTreeMap;
@@ -251,8 +247,6 @@ fn main() {
     tests.insert("tcp_fin", tcp_fin_test);
     tests.insert("thread", thread_test);
     tests.insert("tls", tls_test);
-    tests.insert("clone_grant_using_fmap", clone_grant_using_fmap);
-    tests.insert("check_clone_leak", check_clone_leak);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {

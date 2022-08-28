@@ -7,8 +7,7 @@ name = "acid"
 version = "0.1.0"
 dependencies = [
  "libc",
- "redox_syscall 0.2.12 (git+https://gitlab.redox-os.org/redox-os/syscall.git)",
- "strace",
+ "redox_syscall",
  "x86",
 ]
 
@@ -26,43 +25,25 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "libc"
-version = "0.2.126"
+version = "0.2.132"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "349d5a591cd28b49e1d1037471617a32ddcda5731b99419008085f72d5a53836"
+checksum = "8371e4e5341c3a96db127eb2465ac681ced4c433e01dd0e938adbef26ba93ba5"
 
 [[package]]
 name = "raw-cpuid"
-version = "10.3.0"
+version = "10.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "738bc47119e3eeccc7e94c4a506901aea5e7b4944ecd0829cbebf4af04ceda12"
+checksum = "6aa2540135b6a94f74c7bc90ad4b794f822026a894f3d7bcd185c100d13d4ad6"
 dependencies = [
  "bitflags",
 ]
 
 [[package]]
 name = "redox_syscall"
-version = "0.2.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ae183fc1b06c149f0c1793e1eb447c8b04bfe46d48e9e48bfb8d2d7ed64ecf0"
+version = "0.3.2"
+source = "git+https://gitlab.redox-os.org/redox-os/syscall.git#7eb24a17cef4e8f4617d20925a86a31dd1b777ea"
 dependencies = [
  "bitflags",
-]
-
-[[package]]
-name = "redox_syscall"
-version = "0.2.12"
-source = "git+https://gitlab.redox-os.org/redox-os/syscall.git#30f29c32952343412bb6c36c9fda136d26e9431f"
-dependencies = [
- "bitflags",
-]
-
-[[package]]
-name = "strace"
-version = "0.1.0"
-source = "git+https://gitlab.redox-os.org/redox-os/strace-redox#59425e43bc4284325054bf3ba6ea357d3403ca22"
-dependencies = [
- "bitflags",
- "redox_syscall 0.2.12 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
