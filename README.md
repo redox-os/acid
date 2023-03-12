@@ -4,7 +4,7 @@ Tests to identify faults and incorrect behavior in the Redox microkernel.
 
 ### Tests
 
-- `acid switch` - test to see the context switch time (500/500 for P/C acronyms).
+- `acid switch` - test to see the context switch time in nanoseconds (ns).
 
 P - Parent context switch count (500 by deafult)
 C - Child context switch count (500 by deafult)
