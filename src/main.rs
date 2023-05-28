@@ -3,6 +3,9 @@
 
 const PAGE_SIZE: usize = 4096;
 
+mod cross_scheme_link;
+mod daemon;
+
 fn e<T, E: ToString>(error: Result<T, E>) -> Result<T, String> {
     error.map_err(|e| e.to_string())
 }
@@ -247,6 +250,7 @@ fn main() {
     tests.insert("tcp_fin", tcp_fin_test);
     tests.insert("thread", thread_test);
     tests.insert("tls", tls_test);
+    tests.insert("cross_scheme_link", cross_scheme_link::cross_scheme_link);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {
