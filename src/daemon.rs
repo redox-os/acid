@@ -12,7 +12,7 @@ use syscall::{
     Packet,
     O_CREAT,
     O_RDWR,
-    O_CLOEXEC,
+    O_CLOEXEC, EINTR,
 };
 
 #[must_use = "Daemon::ready must be called"]
@@ -69,26 +69,35 @@ impl Daemon {
 
 pub fn scheme(name: &str, scheme_name: &str, mut scheme: impl SchemeMut) -> Result<()> {
     Daemon::new(move |daemon: Daemon| -> std::convert::Infallible {
-        let e = |r| {
-            match r {
-                Ok(t) => t,
-                Err(e) => {
-                    eprintln!("error in {} daemon: {}", name, e);
-                    std::process::exit(1);
-                }
-            }
+        let error_handler = |error| -> ! {
+            eprintln!("error in {} daemon: {}", name, error);
+            std::process::exit(1)
         };
 
-        let socket = e(syscall::open(format!(":{}", scheme_name), O_CREAT | O_RDWR | O_CLOEXEC));
+        let socket = syscall::open(format!(":{}", scheme_name), O_CREAT | O_RDWR | O_CLOEXEC).unwrap_or_else(|error| error_handler(error));
 
-        daemon.ready();
+        daemon.ready().unwrap_or_else(|error| error_handler(error));
 
         let mut packet = Packet::default();
 
-        loop {
-            if e(syscall::read(socket, &mut packet)) == 0 { break };
+        'outer: loop {
+            'read: loop {
+                match syscall::read(socket, &mut packet) {
+                    Ok(0) => break 'outer,
+                    Ok(_) => break 'read,
+                    Err(Error { errno: EINTR }) => continue 'read,
+                    Err(other) => error_handler(other),
+                }
+            }
             scheme.handle(&mut packet);
-            if e(syscall::write(socket, &packet)) == 0 { break }
+            'write: loop {
+                match syscall::write(socket, &packet) {
+                    Ok(0) => break 'outer,
+                    Ok(_) => break 'write,
+                    Err(Error { errno: EINTR }) => continue 'write,
+                    Err(other) => error_handler(other),
+                }
+            }
         }
         let _ = syscall::close(socket);
 
