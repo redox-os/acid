@@ -8,21 +8,22 @@ impl SchemeMut for Scheme {
         Ok(0)
     }
     fn read(&mut self, _: usize, buf: &mut [u8]) -> Result<usize> {
-        verify_head_tail(buf, 0, 0, 0xD7, 0, 0);
+        verify_head_tail(buf, 0, 0, 0xD7, 0, 0, Some(0xBA), Some(0xAD));
+        buf.fill(0xF1);
 
         Ok(buf.len())
     }
     fn write(&mut self, _: usize, buf: &[u8]) -> Result<usize> {
-        verify_head_tail(buf, 0, 0xDA, 0xDA, 0xDA, 0);
+        verify_head_tail(buf, 0, 0xDA, 0xDA, 0xDA, 0, None, None);
 
         Ok(buf.len())
     }
 }
-fn verify_head_tail(buf: &[u8], before: u8, head_valid: u8, middle: u8, tail_valid: u8, after: u8) {
-    let head = unsafe { core::slice::from_raw_parts(((buf.as_ptr() as usize) / 4096 * 4096) as *const u8, (buf.as_ptr() as usize) % 4096) };
+fn verify_head_tail(buf: &[u8], before: u8, head_valid: u8, middle: u8, tail_valid: u8, after: u8, write_to_head: Option<u8>, write_to_tail: Option<u8>) {
+    let head = unsafe { core::slice::from_raw_parts_mut(((buf.as_ptr() as usize) / 4096 * 4096) as *mut u8, (buf.as_ptr() as usize) % 4096) };
     let tail = unsafe {
         let end = buf.as_ptr().add(buf.len());
-        core::slice::from_raw_parts(end, (4096 - (end as usize % 4096)) % 4096)
+        core::slice::from_raw_parts_mut(end as *mut u8, (4096 - (end as usize % 4096)) % 4096)
     };
     let (head_valid_slice, aligned_slice) = buf.split_at((4096 - head.len()) % 4096);
     let (middle_slice, tail_valid_slice) = aligned_slice.split_at(aligned_slice.len() / 4096 * 4096);
@@ -38,6 +39,13 @@ fn verify_head_tail(buf: &[u8], before: u8, head_valid: u8, middle: u8, tail_val
     assert_eq!(middle_slice, &*vec! [middle; middle_slice.len()]);
     assert_eq!(tail_valid_slice, &*vec! [tail_valid; tail_valid_slice.len()]);
     assert_eq!(tail, &*vec! [after; tail.len()]);
+
+    if let Some(write) = write_to_head {
+        head.fill(write);
+    }
+    if let Some(write) = write_to_tail {
+        tail.fill(write);
+    }
 }
 
 const SPLIT: usize = 3057;
@@ -71,6 +79,10 @@ pub fn scheme_data_leak_test() -> Result<(), String> {
     buf[4096 + LEN..].fill(0xAD);
 
     let _ = syscall::read(fd, &mut buf[SPLIT..][..LEN]).unwrap();
+
+    assert_eq!(&buf[..SPLIT], vec! [0xBF; SPLIT]); // untouched by the kernel
+    assert_eq!(&buf[SPLIT..][..LEN], vec! [0xF1; LEN]); // copied from scheme
+    assert_eq!(&buf[4096 + LEN..], vec! [0xAD; buf.len() - 4096 - LEN]); // untouched by the kernel
 
     std::fs::remove_file(":schemeleak").unwrap();
 
