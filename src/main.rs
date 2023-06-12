@@ -3,6 +3,10 @@
 
 const PAGE_SIZE: usize = 4096;
 
+mod cross_scheme_link;
+mod daemon;
+mod scheme_data_leak;
+
 fn e<T, E: ToString>(error: Result<T, E>) -> Result<T, String> {
     error.map_err(|e| e.to_string())
 }
@@ -233,6 +237,16 @@ fn tls_test() -> Result<(), String> {
 
     Ok(())
 }
+fn efault_test() -> Result<(), String> {
+    use syscall::*;
+
+    let ret = unsafe {
+        syscall3(SYS_WRITE, 1, 0xdeadbeef, 0xfeedface)
+    };
+    assert_eq!(ret, Err(Error::new(EFAULT)));
+
+    Ok(())
+}
 
 fn main() {
     use std::collections::BTreeMap;
@@ -247,6 +261,9 @@ fn main() {
     tests.insert("tcp_fin", tcp_fin_test);
     tests.insert("thread", thread_test);
     tests.insert("tls", tls_test);
+    tests.insert("cross_scheme_link", cross_scheme_link::cross_scheme_link);
+    tests.insert("efault", efault_test);
+    tests.insert("scheme_data_leak", scheme_data_leak::scheme_data_leak_test);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {
