@@ -48,6 +48,49 @@ fn create_test() -> Result<(), String> {
 
     Ok(())
 }
+fn direction_flag_interrupt_test() -> Result<(), String> {
+    // TODO: Add a thread that sleeps for some time, and then kills the other thread.
+    unsafe {
+        core::arch::asm!("
+            std
+        2:
+            pause
+            jmp 2b
+        ", options(noreturn));
+    }
+}
+
+fn direction_flag_syscall_test() -> Result<(), String> {
+    let path = *b"sys:context";
+
+    let result: usize;
+
+    unsafe {
+        core::arch::asm!("
+            std
+            syscall
+            cld
+        ", inout("rax") syscall::SYS_OPEN => result, in("rdi") path.as_ptr(), in("rsi") path.len(), in("rdx") syscall::O_RDONLY, out("rcx") _, out("r11") _);
+    }
+
+    let file = syscall::Error::demux(result).unwrap();
+
+    let mut buf = [0_u8; 4096];
+
+    let result: usize;
+
+    unsafe {
+        core::arch::asm!("
+            std
+            syscall
+            cld
+        ", inout("rax") syscall::SYS_READ => result, in("rdi") file, in("rsi") buf.as_mut_ptr(), in("rdx") buf.len(), out("rcx") _, out("r11") _);
+    }
+
+    syscall::Error::demux(result).unwrap();
+
+    Ok(())
+}
 
 fn page_fault_test() -> Result<(), String> {
     use std::sync::atomic::{AtomicUsize, compiler_fence, Ordering};
@@ -263,6 +306,8 @@ fn main() {
     tests.insert("tls", tls_test);
     tests.insert("cross_scheme_link", cross_scheme_link::cross_scheme_link);
     tests.insert("efault", efault_test);
+    tests.insert("direction_flag_sc", direction_flag_syscall_test);
+    tests.insert("direction_flag_int", direction_flag_interrupt_test);
     tests.insert("scheme_data_leak", scheme_data_leak::scheme_data_leak_test);
 
     let mut ran_test = false;
