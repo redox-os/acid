@@ -1,6 +1,9 @@
 //!Acid testing program
 #![feature(array_chunks, core_intrinsics, thread_local)]
 
+use std::os::unix::thread::JoinHandleExt;
+use std::time::Duration;
+
 const PAGE_SIZE: usize = 4096;
 
 mod cross_scheme_link;
@@ -49,15 +52,27 @@ fn create_test() -> Result<(), String> {
     Ok(())
 }
 fn direction_flag_interrupt_test() -> Result<(), String> {
-    // TODO: Add a thread that sleeps for some time, and then kills the other thread.
+    let thread = std::thread::spawn(|| {
+        unsafe {
+            core::arch::asm!("
+                std
+            2:
+                pause
+                jmp 2b
+            ", options(noreturn));
+        }
+    });
+
+    std::thread::sleep(Duration::from_secs(1));
+
+    let pthread: libc::pthread_t = thread.into_pthread_t();
+
     unsafe {
-        core::arch::asm!("
-            std
-        2:
-            pause
-            jmp 2b
-        ", options(noreturn));
+        assert_eq!(libc::pthread_detach(pthread), 0);
+        assert_eq!(libc::pthread_kill(pthread, libc::SIGKILL), 0);
     }
+
+    Ok(())
 }
 
 fn direction_flag_syscall_test() -> Result<(), String> {
