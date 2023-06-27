@@ -1,6 +1,15 @@
 //!Acid testing program
 #![feature(array_chunks, core_intrinsics, thread_local)]
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::Hasher;
+use std::os::unix::thread::JoinHandleExt;
+use std::sync::Barrier;
+use std::thread;
+use std::time::Duration;
+
+use syscall::O_RDONLY;
+
 const PAGE_SIZE: usize = 4096;
 
 mod cross_scheme_link;
@@ -45,6 +54,134 @@ fn create_test() -> Result<(), String> {
             }
         }
     }
+
+    Ok(())
+}
+fn direction_flag_interrupt_test() -> Result<(), String> {
+    let thread = std::thread::spawn(|| {
+        unsafe {
+            core::arch::asm!("
+                std
+            2:
+                pause
+                jmp 2b
+            ", options(noreturn));
+        }
+    });
+
+    std::thread::sleep(Duration::from_secs(1));
+
+    let pthread: libc::pthread_t = thread.into_pthread_t();
+
+    unsafe {
+        assert_eq!(libc::pthread_detach(pthread), 0);
+        assert_eq!(libc::pthread_kill(pthread, libc::SIGKILL), 0);
+    }
+
+    Ok(())
+}
+
+fn direction_flag_syscall_test() -> Result<(), String> {
+    let path = *b"sys:context";
+
+    let result: usize;
+
+    unsafe {
+        core::arch::asm!("
+            std
+            syscall
+            cld
+        ", inout("rax") syscall::SYS_OPEN => result, in("rdi") path.as_ptr(), in("rsi") path.len(), in("rdx") syscall::O_RDONLY, out("rcx") _, out("r11") _);
+    }
+
+    let file = syscall::Error::demux(result).unwrap();
+
+    let mut buf = [0_u8; 4096];
+
+    let result: usize;
+
+    unsafe {
+        core::arch::asm!("
+            std
+            syscall
+            cld
+        ", inout("rax") syscall::SYS_READ => result, in("rdi") file, in("rsi") buf.as_mut_ptr(), in("rdx") buf.len(), out("rcx") _, out("r11") _);
+    }
+
+    syscall::Error::demux(result).unwrap();
+
+    Ok(())
+}
+fn pipe_test() -> Result<(), String> {
+    let read_fd = syscall::open("pipe:", O_RDONLY).expect("failed to open pipe:");
+    let write_fd = syscall::dup(read_fd, b"write").expect("failed to obtain write pipe");
+
+    let barrier = Barrier::new(2);
+
+    let mut initial_buf = vec! [0_u8; 131768];
+
+    for idx in 0..131768 {
+        let mut hasher = DefaultHasher::new();
+        hasher.write_usize(131768);
+        hasher.write_usize(idx);
+        hasher.write(&initial_buf[..idx]);
+        initial_buf[idx] = hasher.finish() as u8;
+    }
+
+    thread::scope(|scope| {
+        let thread = scope.spawn(|| {
+            // Saturate queue.
+            let bytes_written = syscall::write(write_fd, &vec! [0_u8; 65537]).expect("failed to write to pipe");
+            assert_eq!(bytes_written, 65536);
+
+            barrier.wait();
+
+            // Then try writing again.
+            let bytes_written = syscall::write(write_fd, &[0_u8]).expect("failed to write to pipe");
+            assert_eq!(bytes_written, 1);
+
+            barrier.wait();
+
+            let mut buf = vec! [0_u8; 131768];
+
+            for i in 0..131768 {
+                buf.copy_from_slice(&initial_buf);
+                for byte in &mut buf {
+                    *byte = byte.wrapping_add(i as u8);
+                }
+
+                let mut bytes_written = 0;
+
+                while bytes_written < i {
+                    bytes_written += syscall::write(write_fd, &buf[bytes_written..i]).expect("failed to write to pipe");
+                }
+            }
+        });
+
+        barrier.wait();
+
+        let bytes_read = syscall::read(read_fd, &mut vec! [0_u8; 65537]).expect("failed to read from pipe");
+        assert_eq!(bytes_read, 65536);
+
+        let bytes_read = syscall::read(read_fd, &mut [0_u8]).expect("failed to read from pipe");
+        assert_eq!(bytes_read, 1);
+
+        barrier.wait();
+
+        let mut buf = vec! [0_u8; 131768];
+
+        for i in 0..131768 {
+            let mut bytes_read = 0;
+
+            while bytes_read < i {
+                bytes_read += syscall::read(read_fd, &mut buf[bytes_read..i]).expect("failed to read from pipe");
+            }
+
+            assert!(buf[..i].iter().copied().enumerate().all(|(idx, byte)| byte == initial_buf[idx].wrapping_add(i as u8)));
+        }
+
+        thread.join().unwrap();
+    });
 
     Ok(())
 }
@@ -117,7 +254,6 @@ fn page_fault_test() -> Result<(), String> {
 
 #[cfg(target_arch = "x86_64")]
 fn switch_test() -> Result<(), String> {
-    use std::thread;
     use x86::time::rdtscp;
 
     let tsc = unsafe { rdtscp() };
@@ -158,7 +294,6 @@ fn tcp_fin_test() -> Result<(), String> {
 
 fn thread_test() -> Result<(), String> {
     use std::process::Command;
-    use std::thread;
     use std::time::Instant;
 
     println!("Trying to stop kernel...");
@@ -213,8 +348,6 @@ static mut TBSS_TEST_ZERO: usize = 0;
 static mut TDATA_TEST_NONZERO: usize = usize::max_value();
 
 fn tls_test() -> Result<(), String> {
-    use std::thread;
-
     thread::spawn(|| {
         unsafe {
             assert_eq!(TBSS_TEST_ZERO, 0);
@@ -263,6 +396,9 @@ fn main() {
     tests.insert("tls", tls_test);
     tests.insert("cross_scheme_link", cross_scheme_link::cross_scheme_link);
     tests.insert("efault", efault_test);
+    tests.insert("direction_flag_sc", direction_flag_syscall_test);
+    tests.insert("direction_flag_int", direction_flag_interrupt_test);
+    tests.insert("pipe", pipe_test);
     tests.insert("scheme_data_leak", scheme_data_leak::scheme_data_leak_test);
 
     let mut ran_test = false;
