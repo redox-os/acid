@@ -57,6 +57,8 @@ fn create_test() -> Result<(), String> {
 
     Ok(())
 }
+
+#[cfg(target_arch = "x86_64")]
 fn direction_flag_interrupt_test() -> Result<(), String> {
     let thread = std::thread::spawn(|| {
         unsafe {
@@ -81,6 +83,7 @@ fn direction_flag_interrupt_test() -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_arch = "x86_64")]
 fn direction_flag_syscall_test() -> Result<(), String> {
     let path = *b"sys:context";
 
@@ -396,7 +399,9 @@ fn main() {
     tests.insert("tls", tls_test);
     tests.insert("cross_scheme_link", cross_scheme_link::cross_scheme_link);
     tests.insert("efault", efault_test);
+    #[cfg(target_arch = "x86_64")]
     tests.insert("direction_flag_sc", direction_flag_syscall_test);
+    #[cfg(target_arch = "x86_64")]
     tests.insert("direction_flag_int", direction_flag_interrupt_test);
     tests.insert("pipe", pipe_test);
     tests.insert("scheme_data_leak", scheme_data_leak::scheme_data_leak_test);
