@@ -10,16 +10,16 @@ use std::time::Duration;
 
 use syscall::O_RDONLY;
 
+use std::sync::atomic::{AtomicUsize, Ordering, compiler_fence};
+
+use syscall::{O_CLOEXEC, Map, MapFlags};
+
 const PAGE_SIZE: usize = 4096;
 
 mod cross_scheme_link;
 mod daemon;
 mod scheme_data_leak;
 mod relibc_leak;
-
-fn e<T, E: ToString>(error: Result<T, E>) -> Result<T, String> {
-    error.map_err(|e| e.to_string())
-}
 
 fn create_test() -> Result<(), String> {
     use std::fs;
@@ -54,6 +54,36 @@ fn create_test() -> Result<(), String> {
                 return Err(format!("{} did not contain the correct data", test_file.display()));
             }
         }
+    }
+
+    Ok(())
+}
+fn clone_grant_using_fmap_test() -> Result<(), String> {
+    let mem = syscall::open("shm:clone_grant_using_fmap_test", O_CLOEXEC).unwrap();
+    let base_ptr = unsafe { syscall::fmap(mem, &Map { address: 0, size: PAGE_SIZE, flags: MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_SHARED, offset: 0 }).unwrap() };
+    let shared_ref: &'static AtomicUsize = unsafe { &*(base_ptr as *const AtomicUsize) };
+
+    let mut fds = [0 as libc::c_int; 2];
+    assert!(unsafe { libc::pipe(fds.as_mut_ptr()) } >= 0);
+    let read_fd1 = fds[0] as usize;
+    let write_fd1 = fds[1] as usize;
+
+    assert!(unsafe { libc::pipe(fds.as_mut_ptr()) } >= 0);
+    let read_fd2 = fds[0] as usize;
+    let write_fd2 = fds[1] as usize;
+
+    let fork_res = unsafe { libc::fork() };
+    assert!(fork_res >= 0);
+
+    if fork_res == 0 {
+        shared_ref.store(0xDEADBEEF, Ordering::SeqCst);
+        let _ = syscall::write(write_fd1, &[0]).unwrap();
+        let _ = syscall::read(read_fd2, &mut [0]).unwrap();
+        assert_eq!(shared_ref.load(Ordering::SeqCst), 2);
+    } else {
+        let _ = syscall::read(read_fd1, &mut [0]).unwrap();
+        assert_eq!(shared_ref.compare_exchange(0xDEADBEEF, 2, Ordering::SeqCst, Ordering::SeqCst), Ok(0xDEADBEEF));
+        let _ = syscall::write(write_fd2, &[0]).unwrap();
     }
 
     Ok(())
@@ -191,10 +221,8 @@ fn pipe_test() -> Result<(), String> {
 }
 
 fn page_fault_test() -> Result<(), String> {
-    use std::sync::atomic::{AtomicUsize, compiler_fence, Ordering};
-
-    use syscall::flag::{MapFlags, SigActionFlags, SIGSEGV};
-    use syscall::data::{Map, SigAction};
+    use syscall::flag::{SigActionFlags, SIGSEGV};
+    use syscall::data::SigAction;
 
     const ADDR: usize = 0xDEADC0DE;
     const ALIGNED_ADDR: usize = ADDR / PAGE_SIZE * PAGE_SIZE;
@@ -407,6 +435,7 @@ fn main() {
     tests.insert("pipe", pipe_test);
     tests.insert("scheme_data_leak", scheme_data_leak::scheme_data_leak_test);
     tests.insert("relibc_leak", relibc_leak::test);
+    tests.insert("clone_grant_using_fmap", clone_grant_using_fmap_test);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {
