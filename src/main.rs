@@ -59,10 +59,13 @@ fn create_test() -> Result<(), String> {
     Ok(())
 }
 fn clone_grant_using_fmap_test() -> Result<(), String> {
-    let mem = syscall::open("shm:clone_grant_using_fmap_test", O_CLOEXEC).unwrap();
-    let base_ptr = unsafe { syscall::fmap(mem, &Map { address: 0, size: PAGE_SIZE, flags: MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_SHARED, offset: 0 }).unwrap() };
-    let shared_ref: &'static AtomicUsize = unsafe { &*(base_ptr as *const AtomicUsize) };
+    clone_grant_using_fmap_test_inner(false)
+}
+fn clone_grant_using_fmap_lazy_test() -> Result<(), String> {
+    clone_grant_using_fmap_test_inner(true)
+}
 
+fn test_shared_ref(shared_ref: &AtomicUsize) {
     let mut fds = [0 as libc::c_int; 2];
     assert!(unsafe { libc::pipe(fds.as_mut_ptr()) } >= 0);
     let read_fd1 = fds[0] as usize;
@@ -85,6 +88,24 @@ fn clone_grant_using_fmap_test() -> Result<(), String> {
         assert_eq!(shared_ref.compare_exchange(0xDEADBEEF, 2, Ordering::SeqCst, Ordering::SeqCst), Ok(0xDEADBEEF));
         let _ = syscall::write(write_fd2, &[0]).unwrap();
     }
+}
+
+fn clone_grant_using_fmap_test_inner(lazy: bool) -> Result<(), String> {
+    let lazy_flag = if lazy { MapFlags::MAP_LAZY } else { MapFlags::empty() };
+
+    let mem = syscall::open("shm:clone_grant_using_fmap_test", O_CLOEXEC).unwrap();
+    let base_ptr = unsafe { syscall::fmap(mem, &Map { address: 0, size: PAGE_SIZE, flags: MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_SHARED | lazy_flag, offset: 0 }).unwrap() };
+    let shared_ref: &'static AtomicUsize = unsafe { &*(base_ptr as *const AtomicUsize) };
+
+    test_shared_ref(shared_ref);
+
+    Ok(())
+}
+fn anonymous_map_shared() -> Result<(), String> {
+    let base_ptr = unsafe { syscall::fmap(!0, &Map { address: 0, size: PAGE_SIZE, flags: MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_SHARED, offset: 0 }).unwrap() };
+    let shared_ref: &'static AtomicUsize = unsafe { &*(base_ptr as *const AtomicUsize) };
+
+    test_shared_ref(shared_ref);
 
     Ok(())
 }
@@ -436,6 +457,8 @@ fn main() {
     tests.insert("scheme_data_leak", scheme_data_leak::scheme_data_leak_test);
     tests.insert("relibc_leak", relibc_leak::test);
     tests.insert("clone_grant_using_fmap", clone_grant_using_fmap_test);
+    tests.insert("clone_grant_using_fmap_lazy", clone_grant_using_fmap_lazy_test);
+    tests.insert("anonymous_map_shared", anonymous_map_shared);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {
