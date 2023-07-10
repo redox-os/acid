@@ -6,7 +6,8 @@ edition = "2018"
 
 [dependencies]
 libc = "0.2"
-redox_syscall = { git = "https://gitlab.redox-os.org/redox-os/syscall.git" }
+spin = "0.9"
+redox_syscall = { path = "../../kernel/source/syscall" }
 
 #strace = { git = "https://gitlab.redox-os.org/redox-os/strace-redox", default-features = false }
 #strace = { path = "../../strace/source", default-features = false }

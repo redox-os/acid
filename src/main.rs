@@ -305,6 +305,77 @@ fn page_fault_test() -> Result<(), String> {
     Ok(())
 }
 
+fn tlb_test() -> Result<(), String> {
+    struct Inner {
+        counter: usize,
+        page: *mut usize,
+    }
+    unsafe impl Send for Inner {}
+
+    let mutex = spin::Mutex::new(Inner {
+        counter: 0,
+        page: unsafe {
+            syscall::fmap(!0, &Map {
+                address: 0, offset: 0, flags: MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_PRIVATE, size: PAGE_SIZE
+            }).unwrap() as *mut usize
+        },
+    });
+
+    const N: usize = 1024 * 32;
+    const THREAD_COUNT: usize = 4;
+
+    std::thread::scope(|scope| {
+        let mut threads = Vec::new();
+        for _ in 0..THREAD_COUNT {
+            threads.push(scope.spawn(|| unsafe {
+                for _ in 0..N {
+                    let mut guard = mutex.lock();
+                    let stored_value = guard.page.read();
+
+                    assert_eq!(stored_value, guard.counter);
+
+                    guard.counter += 1;
+
+                    guard.page = syscall::fmap(!0, &Map {
+                        address: guard.page as usize,
+                        size: PAGE_SIZE,
+                        flags: MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_PRIVATE | MapFlags::MAP_FIXED,
+                        offset: 0,
+                    }).unwrap() as *mut usize;
+
+                    guard.page.write(guard.counter);
+                }
+            }));
+        }
+
+        // Use this thread to prevent the same physical address from being reused.
+        //
+        // Unsure if it makes a difference, but I was able to successfully get the test to fail
+        // (lol) using it.
+        threads.push(scope.spawn(|| unsafe {
+            const KEEP_BUSY_PAGE_COUNT: usize = 1024;
+
+            let mut frames = vec! [0; KEEP_BUSY_PAGE_COUNT];
+
+            for _ in 0..256 {
+                for i in 0..KEEP_BUSY_PAGE_COUNT {
+                    frames[i] = syscall::physalloc(PAGE_SIZE).unwrap();
+                }
+                for i in 0..KEEP_BUSY_PAGE_COUNT {
+                    syscall::physfree(frames[i], PAGE_SIZE).unwrap();
+                }
+            }
+        }));
+        for thread in threads {
+            thread.join().unwrap();
+        }
+    });
+
+    assert_eq!(mutex.into_inner().counter, N * THREAD_COUNT);
+
+    Ok(())
+}
+
 #[cfg(target_arch = "x86_64")]
 fn switch_test() -> Result<(), String> {
     use x86::time::rdtscp;
@@ -459,6 +530,7 @@ fn main() {
     tests.insert("clone_grant_using_fmap", clone_grant_using_fmap_test);
     tests.insert("clone_grant_using_fmap_lazy", clone_grant_using_fmap_lazy_test);
     tests.insert("anonymous_map_shared", anonymous_map_shared);
+    tests.insert("tlb", tlb_test);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {
