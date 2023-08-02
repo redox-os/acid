@@ -12,9 +12,13 @@ use syscall::O_RDONLY;
 
 use std::sync::atomic::{AtomicUsize, Ordering, compiler_fence};
 
-use syscall::{O_CLOEXEC, Map, MapFlags};
+use std::fs::{File, OpenOptions};
+use std::io::Write;
+use std::os::fd::{IntoRawFd, FromRawFd, RawFd, AsRawFd};
 
-const PAGE_SIZE: usize = 4096;
+use syscall::{O_CLOEXEC, Map, MapFlags, ADDRSPACE_OP_MMAP, ADDRSPACE_OP_MUNMAP};
+
+use syscall::PAGE_SIZE;
 
 mod cross_scheme_link;
 mod daemon;
@@ -23,7 +27,7 @@ mod relibc_leak;
 
 fn create_test() -> Result<(), String> {
     use std::fs;
-    use std::io::{self, Read, Write};
+    use std::io::{self, Read};
     use std::path::PathBuf;
 
     let mut test_dir = PathBuf::new();
@@ -101,6 +105,117 @@ fn clone_grant_using_fmap_test_inner(lazy: bool) -> Result<(), String> {
 
     Ok(())
 }
+
+fn file_mmap_test() -> Result<(), String> {
+    let file = OpenOptions::new().read(true).write(true).create(true).open("acid_tmp_file").unwrap();
+    let fd = file.into_raw_fd() as usize;
+
+    let buf = unsafe {
+        let ptr = syscall::fmap(fd, &Map { address: 0, size: 8192 + 127, flags: MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_SHARED, offset: 0 }).unwrap();
+        core::slice::from_raw_parts_mut(ptr as *mut u8, 8192 + 127)
+    };
+    let buf2 = unsafe {
+        let ptr = syscall::fmap(fd, &Map { address: 0, size: 1337, flags: MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_SHARED, offset: 3 * 4096 }).unwrap();
+        core::slice::from_raw_parts_mut(ptr as *mut u8, 1337)
+    };
+
+    for (i, byte) in buf.iter_mut().enumerate() {
+        *byte = i as u8;
+    }
+    for (i, byte) in buf2.iter_mut().enumerate() {
+        *byte = (i as u8).wrapping_mul(57);
+    }
+
+    let functions: [unsafe fn(&mut [u8]) -> (); 3] = [
+        |buf| unsafe {
+            let buf = &mut buf[8192..];
+            syscall::funmap(buf.as_mut_ptr() as usize, buf.len()).unwrap();
+        },
+        |buf| unsafe {
+            let buf = &mut buf[..4096];
+            syscall::funmap(buf.as_mut_ptr() as usize, buf.len()).unwrap();
+        },
+        |buf| unsafe {
+            let buf = &mut buf[4096..][..4096];
+            syscall::funmap(buf.as_mut_ptr() as usize, buf.len()).unwrap();
+        },
+    ];
+
+    // TODO: Run the test repeatedly in a different order each time.
+    let order = [2, 1, 0];
+    unsafe {
+        let [i, j, k] = order;
+        dbg!(i, j, k);
+        functions[i](buf);
+        functions[j](buf);
+        functions[k](buf);
+    }
+
+
+    let parent_memory = File::open("thisproc:current/addrspace").unwrap();
+
+    unsafe {
+        let mut pipes1 = [0; 2];
+        let mut pipes2 = [0; 2];
+        assert_eq!(libc::pipe(pipes1.as_mut_ptr()), 0);
+        assert_eq!(libc::pipe(pipes2.as_mut_ptr()), 0);
+
+        let child = libc::fork();
+        assert_ne!(child, -1);
+
+        if child == 0 {
+            let mut child_memory = File::open("thisproc:current/addrspace").unwrap();
+
+            let words = [
+                ADDRSPACE_OP_MMAP,
+                parent_memory.as_raw_fd() as usize,
+                buf2.as_ptr() as usize,
+                0xDEADB000,
+                4096,
+                (MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_FIXED_NOREPLACE).bits(),
+            ];
+
+            dbg!();
+            child_memory.write(core::slice::from_raw_parts(words.as_ptr().cast(), words.len() * core::mem::size_of::<usize>())).unwrap();
+            dbg!();
+
+            let _ = syscall::write(pipes1[1] as usize, &[1]).unwrap();
+            dbg!();
+
+            let words = [
+                ADDRSPACE_OP_MUNMAP,
+                0xDEADB000,
+                4096,
+            ];
+            child_memory.write(core::slice::from_raw_parts(words.as_ptr().cast(), words.len() * core::mem::size_of::<usize>())).unwrap();
+
+            let _ = syscall::write(pipes2[1] as usize, &[1]).unwrap();
+            dbg!();
+
+            std::process::exit(0);
+        } else {
+            dbg!();
+            let _ = syscall::read(pipes1[0] as usize, &mut [0]).unwrap();
+            assert_eq!(syscall::funmap(buf2.as_ptr() as usize, 4096), Err(syscall::Error::new(syscall::EBUSY)));
+            dbg!();
+            let _ = syscall::read(pipes2[0] as usize, &mut [0]).unwrap();
+            assert_eq!(syscall::funmap(buf2.as_ptr() as usize, 4096), Ok(0));
+            dbg!();
+        }
+    }
+
+    drop(unsafe { File::from_raw_fd(fd as RawFd) });
+
+    let data = std::fs::read("acid_tmp_file").unwrap();
+    for (i, byte) in data.iter().enumerate().skip(4096).take(4096) {
+        assert_eq!(i % 256, usize::from(*byte));
+    }
+
+    std::fs::remove_file("acid_tmp_file").unwrap();
+
+    Ok(())
+}
+
 fn anonymous_map_shared() -> Result<(), String> {
     let base_ptr = unsafe { syscall::fmap(!0, &Map { address: 0, size: PAGE_SIZE, flags: MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_SHARED, offset: 0 }).unwrap() };
     let shared_ref: &'static AtomicUsize = unsafe { &*(base_ptr as *const AtomicUsize) };
@@ -406,7 +521,6 @@ fn switch_test() -> Result<(), String> {
 }
 
 fn tcp_fin_test() -> Result<(), String> {
-    use std::io::Write;
     use std::net::TcpStream;
 
     let mut conn = TcpStream::connect("static.redox-os.org:80").map_err(|err| format!("{}", err))?;
@@ -531,6 +645,7 @@ fn main() {
     tests.insert("clone_grant_using_fmap_lazy", clone_grant_using_fmap_lazy_test);
     tests.insert("anonymous_map_shared", anonymous_map_shared);
     tests.insert("tlb", tlb_test);
+    tests.insert("file_mmap", file_mmap_test);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {
