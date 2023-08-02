@@ -15,6 +15,7 @@ const PAGE_SIZE: usize = 4096;
 mod cross_scheme_link;
 mod daemon;
 mod scheme_data_leak;
+mod relibc_leak;
 
 fn e<T, E: ToString>(error: Result<T, E>) -> Result<T, String> {
     error.map_err(|e| e.to_string())
@@ -405,6 +406,7 @@ fn main() {
     tests.insert("direction_flag_int", direction_flag_interrupt_test);
     tests.insert("pipe", pipe_test);
     tests.insert("scheme_data_leak", scheme_data_leak::scheme_data_leak_test);
+    tests.insert("relibc_leak", relibc_leak::test);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {
