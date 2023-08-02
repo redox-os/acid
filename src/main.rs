@@ -111,8 +111,8 @@ fn file_mmap_test() -> Result<(), String> {
     let fd = file.into_raw_fd() as usize;
 
     let buf = unsafe {
-        let ptr = syscall::fmap(fd, &Map { address: 0, size: 8192 + 127, flags: MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_SHARED, offset: 0 }).unwrap();
-        core::slice::from_raw_parts_mut(ptr as *mut u8, 8192 + 127)
+        let ptr = syscall::fmap(fd, &Map { address: 0, size: 16384 + 127, flags: MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_SHARED, offset: 0 }).unwrap();
+        core::slice::from_raw_parts_mut(ptr as *mut u8, 16384 + 127)
     };
     let buf2 = unsafe {
         let ptr = syscall::fmap(fd, &Map { address: 0, size: 1337, flags: MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_SHARED, offset: 3 * 4096 }).unwrap();
@@ -128,15 +128,15 @@ fn file_mmap_test() -> Result<(), String> {
 
     let functions: [unsafe fn(&mut [u8]) -> (); 3] = [
         |buf| unsafe {
-            let buf = &mut buf[8192..];
+            let buf = &mut buf[12288..];
             syscall::funmap(buf.as_mut_ptr() as usize, buf.len()).unwrap();
         },
         |buf| unsafe {
-            let buf = &mut buf[..4096];
+            let buf = &mut buf[..8192];
             syscall::funmap(buf.as_mut_ptr() as usize, buf.len()).unwrap();
         },
         |buf| unsafe {
-            let buf = &mut buf[4096..][..4096];
+            let buf = &mut buf[8192..][..4096];
             syscall::funmap(buf.as_mut_ptr() as usize, buf.len()).unwrap();
         },
     ];
