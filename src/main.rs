@@ -503,21 +503,30 @@ fn tlb_test() -> Result<(), String> {
         for _ in 0..THREAD_COUNT {
             threads.push(scope.spawn(|| unsafe {
                 for _ in 0..N {
+                    let new_page = syscall::fmap(!0, &Map {
+                        address: 0,
+                        offset: 0,
+                        flags: MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_PRIVATE,
+                        size: PAGE_SIZE,
+                    }).unwrap() as *mut usize;
+
                     let mut guard = mutex.lock();
-                    let stored_value = guard.page.read();
+                    let stored_value = guard.page.read_volatile();
 
                     assert_eq!(stored_value, guard.counter);
 
                     guard.counter += 1;
+                    new_page.write_volatile(guard.counter);
 
+                    /*
                     guard.page = syscall::fmap(!0, &Map {
                         address: guard.page as usize,
                         size: PAGE_SIZE,
                         flags: MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_PRIVATE | MapFlags::MAP_FIXED,
                         offset: 0,
                     }).unwrap() as *mut usize;
-
-                    guard.page.write(guard.counter);
+                    */
+                    assert_eq!(syscall::syscall5(syscall::SYS_MREMAP, new_page as usize, PAGE_SIZE, guard.page as usize, PAGE_SIZE, syscall::MremapFlags::FIXED_REPLACE.bits()).unwrap(), guard.page as usize);
                 }
             }));
         }
