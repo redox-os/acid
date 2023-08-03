@@ -113,7 +113,7 @@ fn redoxfs_range_bookkeeping() -> Result<(), String> {
     let mut chunks = vec! [false; P];
 
     // Number of operations
-    const N: usize = 100;
+    const N: usize = 10000;
 
     let file = OpenOptions::new().create(true).write(true).read(true).open("tmp").unwrap();
     file.set_len((P * PAGE_SIZE) as u64).unwrap();
