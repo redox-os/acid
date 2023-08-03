@@ -106,6 +106,65 @@ fn clone_grant_using_fmap_test_inner(lazy: bool) -> Result<(), String> {
     Ok(())
 }
 
+fn redoxfs_range_bookkeeping() -> Result<(), String> {
+    // Number of pages
+    const P: usize = 128;
+
+    let mut chunks = vec! [false; P];
+
+    // Number of operations
+    const N: usize = 100;
+
+    let file = OpenOptions::new().create(true).write(true).read(true).open("tmp").unwrap();
+    file.set_len((P * PAGE_SIZE) as u64).unwrap();
+    let fd = file.into_raw_fd() as usize;
+
+    println!("Created file");
+
+    fn rand() -> usize {
+        let ret: usize;
+        unsafe { core::arch::asm!("rdrand {}", out(reg) ret); }
+        ret
+    }
+
+    for _ in 0..N {
+        let n = rand();
+        let insert_not_remove = n & (1 << (usize::BITS - 1)) != 0;
+        let idx = n % P;
+
+        if insert_not_remove {
+            let Some((first_unused, _)) = chunks.iter().copied().enumerate().filter(|&(_, c)| !c).nth(idx) else {
+                continue;
+            };
+            chunks[first_unused] = true;
+
+            println!("INS {}", first_unused);
+
+            unsafe {
+                let _ = syscall::fmap(fd, &Map {
+                    address: 0xDEADB000 + first_unused * PAGE_SIZE,
+                    offset: first_unused * PAGE_SIZE,
+                    flags: MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_SHARED | MapFlags::MAP_FIXED,
+                    size: PAGE_SIZE,
+                }).expect("failed to fmap");
+            }
+        } else {
+            let Some((first_used, _)) = chunks.iter().copied().enumerate().filter(|&(_, c)| c).nth(idx) else {
+                continue;
+            };
+            chunks[first_used] = false;
+
+            println!("REM {}", first_used);
+
+            unsafe {
+                syscall::funmap(0xDEADBEEF000 + first_used * PAGE_SIZE, PAGE_SIZE).expect("failed to funmap");
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn file_mmap_test() -> Result<(), String> {
     let file = OpenOptions::new().read(true).write(true).create(true).open("acid_tmp_file").unwrap();
     let fd = file.into_raw_fd() as usize;
@@ -646,6 +705,7 @@ fn main() {
     tests.insert("anonymous_map_shared", anonymous_map_shared);
     tests.insert("tlb", tlb_test);
     tests.insert("file_mmap", file_mmap_test);
+    tests.insert("redoxfs_range_bookkeeping", redoxfs_range_bookkeeping);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {
