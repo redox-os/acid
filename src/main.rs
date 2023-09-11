@@ -157,7 +157,7 @@ fn redoxfs_range_bookkeeping() -> Result<(), String> {
             println!("REM {}", first_used);
 
             unsafe {
-                syscall::funmap(0xDEADBEEF000 + first_used * PAGE_SIZE, PAGE_SIZE).expect("failed to funmap");
+                syscall::funmap(0xDEADB000 + first_used * PAGE_SIZE, PAGE_SIZE).expect("failed to funmap");
             }
         }
     }
