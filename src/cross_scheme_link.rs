@@ -1,3 +1,6 @@
+use std::io::Read;
+use std::os::fd::{FromRawFd, RawFd};
+
 use syscall::CallerCtx;
 use syscall::data::Event;
 use syscall::error::{Error, Result};
@@ -31,29 +34,6 @@ impl SchemeMut for DupScheme {
     }
 }
 
-fn test_event_queue(eq: usize) -> Result<()> {
-    let mut fds = [0_usize; 2];
-    syscall::pipe2(&mut fds, O_CLOEXEC)?;
-    let [read, write] = fds;
-
-    let event = Event {
-        id: read,
-        flags: EventFlags::EVENT_READ,
-        data: 0,
-    };
-    syscall::write(eq, &event).unwrap();
-
-    syscall::write(write, b"(unused)")?;
-
-    let mut read_event = Event::default();
-    syscall::read(eq, &mut read_event)?;
-    assert_eq!(read_event.id, event.id);
-    assert_eq!(read_event.flags, event.flags);
-    assert_eq!(read_event.data, event.data);
-
-    Ok(())
-}
-
 fn inner() -> Result<()> {
     println!("Testing cross scheme links");
     crate::daemon::scheme("cross_scheme_link_redirect", "redirect", RedirectScheme).unwrap();
@@ -63,16 +43,25 @@ fn inner() -> Result<()> {
     // Open an event queue through the redirect scheme. Unless the kernel is trying to trick us by
     // renaming `event:`, it will never work without cross scheme links;
 
-    let eq1 = syscall::open("redirect:event:", O_RDWR | O_CLOEXEC)?;
-    let eq2 = {
-        let dup_handle = syscall::open("dup:", O_CLOEXEC)?;
-        let queue = syscall::dup(dup_handle, b"event:")?;
-        let _ = syscall::close(dup_handle);
-        queue
-    };
+    let path = "file:/tmp/cross_scheme_link.tmp";
+    let data = "some data";
 
-    test_event_queue(eq1).unwrap();
-    test_event_queue(eq2).unwrap();
+    std::fs::write(path, data).unwrap();
+
+    let mut file2 = unsafe { std::fs::File::from_raw_fd(syscall::open(format!("redirect:{path}"), O_RDWR | O_CLOEXEC)? as RawFd) };
+    let mut file3 = unsafe {
+        let dup_handle = syscall::open("dup:", O_CLOEXEC)?;
+        let fd = syscall::dup(dup_handle, path.as_bytes())?;
+        let _ = syscall::close(dup_handle);
+        std::fs::File::from_raw_fd(fd as RawFd)
+    };
+    let mut buf1 = String::new();
+    let mut buf2 = String::new();
+    file2.read_to_string(&mut buf1).unwrap();
+    file3.read_to_string(&mut buf2).unwrap();
+
+    assert_eq!(buf1, data);
+    assert_eq!(buf2, data);
 
     let _ = syscall::unlink(":redirect");
     let _ = syscall::unlink(":dup");

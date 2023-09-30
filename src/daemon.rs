@@ -1,5 +1,6 @@
 use std::convert::Infallible;
 
+use libc::c_int;
 use syscall::{
     Result,
     Error,
@@ -22,10 +23,12 @@ pub struct Daemon {
 
 impl Daemon {
     pub fn new<F: FnOnce(Daemon) -> Infallible>(f: F) -> Result<u8> {
-        let mut pipes = [0; 2];
-        pipe2(&mut pipes, 0)?;
+        let mut pipes = [0 as c_int; 2];
+        unsafe {
+            assert_eq!(libc::pipe(pipes.as_mut_ptr()), 0);
+        }
 
-        let [read_pipe, write_pipe] = pipes;
+        let [read_pipe, write_pipe] = pipes.map(|p| p as usize);
 
         let res = unsafe { libc::fork() };
         assert!(res >= 0);
