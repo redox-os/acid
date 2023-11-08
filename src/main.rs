@@ -25,6 +25,7 @@ mod daemon;
 mod scheme_data_leak;
 mod relibc_leak;
 
+#[cfg(target_arch = "x86_64")]
 fn avx2_test() -> Result<(), String> {
     let mut a: [u8; 32] = [0x41; 32];
     let mut b: [u8; 32] = [0x42; 32];
@@ -713,6 +714,7 @@ fn main() {
     use std::time::Instant;
 
     let mut tests: BTreeMap<&'static str, fn() -> Result<(), String>> = BTreeMap::new();
+    #[cfg(target_arch = "x86_64")]
     tests.insert("avx2", avx2_test);
     tests.insert("create_test", create_test);
     tests.insert("page_fault", page_fault_test);
