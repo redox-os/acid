@@ -8,6 +8,7 @@ edition = "2021"
 libc = "0.2"
 spin = "0.9"
 redox_syscall = { git = "https://gitlab.redox-os.org/redox-os/syscall.git" }
+anyhow = "1.0.81"
 
 #strace = { git = "https://gitlab.redox-os.org/redox-os/strace-redox", default-features = false }
 #strace = { path = "../../strace/source", default-features = false }

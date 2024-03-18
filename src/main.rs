@@ -1,33 +1,36 @@
 //!Acid testing program
 #![feature(array_chunks, asm_const, core_intrinsics, thread_local)]
 
+use std::{env, process};
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::hash::Hasher;
 use std::os::unix::thread::JoinHandleExt;
 use std::sync::Barrier;
 use std::thread;
-use std::time::Duration;
-
-use syscall::O_RDONLY;
-
+use std::time::{Duration, Instant};
 use std::sync::atomic::{AtomicUsize, Ordering, compiler_fence};
-
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::os::fd::{IntoRawFd, FromRawFd, RawFd, AsRawFd};
+use std::process::Command;
+use std::net::TcpStream;
 
 use syscall::{O_CLOEXEC, Map, MapFlags, ADDRSPACE_OP_MMAP, ADDRSPACE_OP_MUNMAP};
-
+use syscall::O_RDONLY;
 use syscall::PAGE_SIZE;
+
+use anyhow::{bail, Result};
 
 mod cross_scheme_link;
 mod daemon;
 mod scheme_data_leak;
 mod relibc_leak;
 mod eintr;
+mod syscall_bench;
 
 #[cfg(target_arch = "x86_64")]
-fn avx2_test() -> Result<(), String> {
+fn avx2_test() -> Result<()> {
     let mut a: [u8; 32] = [0x41; 32];
     let mut b: [u8; 32] = [0x42; 32];
     unsafe {
@@ -47,7 +50,7 @@ fn avx2_test() -> Result<(), String> {
     Ok(())
 }
 
-fn create_test() -> Result<(), String> {
+fn create_test() -> Result<()> {
     use std::fs;
     use std::io::{self, Read};
     use std::path::PathBuf;
@@ -59,35 +62,35 @@ fn create_test() -> Result<(), String> {
     test_file.push("test_file");
     let test_file_err = fs::File::create(&test_file).err().map(|err| err.kind());
     if test_file_err != Some(io::ErrorKind::NotFound) {
-        return Err(format!("Incorrect open error: {:?}, should be NotFound", test_file_err));
+        bail!("Incorrect open error: {:?}, should be NotFound", test_file_err);
     }
 
-    fs::create_dir(&test_dir).map_err(|err| format!("{}", err))?;
+    fs::create_dir(&test_dir)?;
 
     let test_data = "Test data";
     {
-        let mut file = fs::File::create(&test_file).map_err(|err| format!("{}", err))?;
-        file.write(test_data.as_bytes()).map_err(|err| format!("{}", err))?;
+        let mut file = fs::File::create(&test_file)?;
+        file.write(test_data.as_bytes())?;
     }
 
     {
-        let mut file = fs::File::open(&test_file).map_err(|err| format!("{}", err))?;
+        let mut file = fs::File::open(&test_file)?;
         let mut buffer: Vec<u8> = Vec::new();
-        file.read_to_end(&mut buffer).map_err(|err| format!("{}", err))?;
+        file.read_to_end(&mut buffer)?;
         assert_eq!(buffer.len(), test_data.len());
         for (&a, b) in buffer.iter().zip(test_data.bytes()) {
             if a != b {
-                return Err(format!("{} did not contain the correct data", test_file.display()));
+                bail!("{} did not contain the correct data", test_file.display());
             }
         }
     }
 
     Ok(())
 }
-fn clone_grant_using_fmap_test() -> Result<(), String> {
+fn clone_grant_using_fmap_test() -> Result<()> {
     clone_grant_using_fmap_test_inner(false)
 }
-fn clone_grant_using_fmap_lazy_test() -> Result<(), String> {
+fn clone_grant_using_fmap_lazy_test() -> Result<()> {
     clone_grant_using_fmap_test_inner(true)
 }
 
@@ -116,7 +119,7 @@ fn test_shared_ref(shared_ref: &AtomicUsize) {
     }
 }
 
-fn clone_grant_using_fmap_test_inner(lazy: bool) -> Result<(), String> {
+fn clone_grant_using_fmap_test_inner(lazy: bool) -> Result<()> {
     let lazy_flag = if lazy { MapFlags::MAP_LAZY } else { MapFlags::empty() };
 
     let mem = syscall::open("shm:clone_grant_using_fmap_test", O_CLOEXEC).unwrap();
@@ -128,7 +131,7 @@ fn clone_grant_using_fmap_test_inner(lazy: bool) -> Result<(), String> {
     Ok(())
 }
 
-fn redoxfs_range_bookkeeping() -> Result<(), String> {
+fn redoxfs_range_bookkeeping() -> Result<()> {
     // Number of pages
     const P: usize = 128;
 
@@ -187,7 +190,7 @@ fn redoxfs_range_bookkeeping() -> Result<(), String> {
     Ok(())
 }
 
-fn file_mmap_test() -> Result<(), String> {
+fn file_mmap_test() -> Result<()> {
     let file = OpenOptions::new().read(true).write(true).create(true).open("acid_tmp_file").unwrap();
     let fd = file.into_raw_fd() as usize;
 
@@ -297,7 +300,7 @@ fn file_mmap_test() -> Result<(), String> {
     Ok(())
 }
 
-fn anonymous_map_shared() -> Result<(), String> {
+fn anonymous_map_shared() -> Result<()> {
     let base_ptr = unsafe { syscall::fmap(!0, &Map { address: 0, size: PAGE_SIZE, flags: MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_SHARED, offset: 0 }).unwrap() };
     let shared_ref: &'static AtomicUsize = unsafe { &*(base_ptr as *const AtomicUsize) };
 
@@ -307,7 +310,7 @@ fn anonymous_map_shared() -> Result<(), String> {
 }
 
 #[cfg(target_arch = "x86_64")]
-fn direction_flag_interrupt_test() -> Result<(), String> {
+fn direction_flag_interrupt_test() -> Result<()> {
     let thread = std::thread::spawn(|| {
         unsafe {
             core::arch::asm!("
@@ -332,7 +335,7 @@ fn direction_flag_interrupt_test() -> Result<(), String> {
 }
 
 #[cfg(target_arch = "x86_64")]
-fn direction_flag_syscall_test() -> Result<(), String> {
+fn direction_flag_syscall_test() -> Result<()> {
     let path = *b"sys:context";
 
     let result: usize;
@@ -363,7 +366,7 @@ fn direction_flag_syscall_test() -> Result<(), String> {
 
     Ok(())
 }
-fn pipe_test() -> Result<(), String> {
+fn pipe_test() -> Result<()> {
     let read_fd = syscall::open("pipe:", O_RDONLY).expect("failed to open pipe:");
     let write_fd = syscall::dup(read_fd, b"write").expect("failed to obtain write pipe");
 
@@ -437,7 +440,7 @@ fn pipe_test() -> Result<(), String> {
     Ok(())
 }
 
-fn page_fault_test() -> Result<(), String> {
+fn page_fault_test() -> Result<()> {
     use syscall::flag::{SigActionFlags, SIGSEGV};
     use syscall::data::SigAction;
 
@@ -478,7 +481,7 @@ fn page_fault_test() -> Result<(), String> {
         sa_mask: [0; 2],
         sa_flags: SigActionFlags::empty(),
     };
-    syscall::sigaction(SIGSEGV, Some(&new_sigaction), None).map_err(|err| format!("{}", err))?;
+    syscall::sigaction(SIGSEGV, Some(&new_sigaction), None).unwrap();
 
     for i in 0..2 {
         println!("Reading {} time:", if i == 0 { "first" } else if i == 1 { "second" } else { unreachable!() });
@@ -501,7 +504,7 @@ fn page_fault_test() -> Result<(), String> {
     Ok(())
 }
 
-fn tlb_test() -> Result<(), String> {
+fn tlb_test() -> Result<()> {
     struct Inner {
         counter: usize,
         page: *mut usize,
@@ -582,7 +585,7 @@ fn tlb_test() -> Result<(), String> {
 }
 
 #[cfg(target_arch = "x86_64")]
-fn switch_test() -> Result<(), String> {
+fn switch_test() -> Result<()> {
     use x86::time::rdtscp;
 
     let tsc = unsafe { rdtscp() };
@@ -610,20 +613,15 @@ fn switch_test() -> Result<(), String> {
     Ok(())
 }
 
-fn tcp_fin_test() -> Result<(), String> {
-    use std::net::TcpStream;
-
-    let mut conn = TcpStream::connect("static.redox-os.org:80").map_err(|err| format!("{}", err))?;
-    conn.write(b"TEST").map_err(|err| format!("{}", err))?;
+fn tcp_fin_test() -> Result<()> {
+    let mut conn = TcpStream::connect("static.redox-os.org:80")?;
+    conn.write(b"TEST")?;
     drop(conn);
 
     Ok(())
 }
 
-fn thread_test() -> Result<(), String> {
-    use std::process::Command;
-    use std::time::Instant;
-
+fn thread_test() -> Result<()> {
     println!("Trying to stop kernel...");
 
     let start = Instant::now();
@@ -675,7 +673,7 @@ static mut TBSS_TEST_ZERO: usize = 0;
 #[thread_local]
 static mut TDATA_TEST_NONZERO: usize = usize::max_value();
 
-fn tls_test() -> Result<(), String> {
+fn tls_test() -> Result<()> {
     thread::spawn(|| {
         unsafe {
             assert_eq!(TBSS_TEST_ZERO, 0);
@@ -698,7 +696,7 @@ fn tls_test() -> Result<(), String> {
 
     Ok(())
 }
-fn efault_test() -> Result<(), String> {
+fn efault_test() -> Result<()> {
     use syscall::*;
 
     let ret = unsafe {
@@ -710,11 +708,8 @@ fn efault_test() -> Result<(), String> {
 }
 
 fn main() {
-    use std::collections::BTreeMap;
-    use std::{env, process};
-    use std::time::Instant;
 
-    let mut tests: BTreeMap<&'static str, fn() -> Result<(), String>> = BTreeMap::new();
+    let mut tests: HashMap<&'static str, fn() -> Result<()>> = HashMap::new();
     #[cfg(target_arch = "x86_64")]
     tests.insert("avx2", avx2_test);
     tests.insert("create_test", create_test);
@@ -740,6 +735,7 @@ fn main() {
     tests.insert("file_mmap", file_mmap_test);
     tests.insert("redoxfs_range_bookkeeping", redoxfs_range_bookkeeping);
     tests.insert("eintr", eintr::eintr);
+    tests.insert("syscall_bench", syscall_bench::bench);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {

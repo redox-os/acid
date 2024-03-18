@@ -1,7 +1,7 @@
 use std::thread;
 use syscall::{Error, EINTR};
 
-pub fn eintr() -> Result<(), String> {
+pub fn eintr() -> anyhow::Result<()> {
     let mut fds = [0; 2];
     unsafe {
         assert_ne!(libc::pipe(fds.as_mut_ptr()), -1);
