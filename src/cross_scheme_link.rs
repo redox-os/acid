@@ -2,14 +2,14 @@ use std::io::Read;
 use std::os::fd::{FromRawFd, RawFd};
 
 use syscall::CallerCtx;
-use syscall::data::Event;
 use syscall::error::{Error, Result};
 use syscall::error::{EINVAL, ENOENT};
-use syscall::flag::{EventFlags, O_RDWR, O_CLOEXEC};
+use syscall::flag::{O_RDWR, O_CLOEXEC};
 use syscall::scheme::{OpenResult, SchemeMut};
 
-pub fn cross_scheme_link() -> Result<(), String> {
-    inner().map_err(|e| e.to_string())
+pub fn cross_scheme_link() -> anyhow::Result<()> {
+    inner().unwrap();
+    Ok(())
 }
 struct RedirectScheme;
 
