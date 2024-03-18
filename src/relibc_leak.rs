@@ -1,5 +1,6 @@
+use anyhow::Result;
 
-pub fn test() -> Result<(), String> {
+pub fn test() -> Result<()> {
     loop {
         let mut thread_list = vec![];
         for i in 1..5 {

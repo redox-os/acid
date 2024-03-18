@@ -51,7 +51,7 @@ fn verify_head_tail(buf: &[u8], before: u8, head_valid: u8, middle: u8, tail_val
 const SPLIT: usize = 3057;
 const LEN: usize = 1256 + 8192;
 
-pub fn scheme_data_leak_test() -> Result<(), String> {
+pub fn scheme_data_leak_test() -> anyhow::Result<()> {
     crate::daemon::scheme("scheme_leak_test", "schemeleak", Scheme).unwrap();
 
     let buf = unsafe {
