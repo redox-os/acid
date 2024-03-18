@@ -24,6 +24,7 @@ mod cross_scheme_link;
 mod daemon;
 mod scheme_data_leak;
 mod relibc_leak;
+mod eintr;
 
 #[cfg(target_arch = "x86_64")]
 fn avx2_test() -> Result<(), String> {
@@ -738,6 +739,7 @@ fn main() {
     tests.insert("tlb", tlb_test);
     tests.insert("file_mmap", file_mmap_test);
     tests.insert("redoxfs_range_bookkeeping", redoxfs_range_bookkeeping);
+    tests.insert("eintr", eintr::eintr);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {
