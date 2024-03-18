@@ -22,11 +22,13 @@ pub fn eintr() -> Result<(), String> {
         let _ = syscall::kill(pid, syscall::SIGUSR1).unwrap();
     });
 
-    let _ = syscall::write(writer1, &[0]);
 
     let listener = syscall::open("chan:acid", syscall::O_CREAT).unwrap();
     let _writer2 = syscall::open("chan:acid", 0).unwrap();
     let reader2 = syscall::dup(listener, b"listen").unwrap();
+
+    let _ = syscall::write(writer1, &[0]);
+
     assert_eq!(syscall::read(reader2, &mut [0]).unwrap_err(), Error::new(EINTR));
 
     handle.join().unwrap();
