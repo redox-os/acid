@@ -87,6 +87,32 @@ fn create_test() -> Result<()> {
 
     Ok(())
 }
+
+fn channel_test() -> Result<()> {
+    let mut threads = Vec::new();
+    let (tx, mut rx) = std::sync::mpsc::channel();
+    for i in 0..256 {
+        eprintln!("spawn thread {}", i);
+        let (next_tx, next_rx) = std::sync::mpsc::channel();
+        threads.push(thread::spawn(move || {
+            let value = rx.recv().unwrap();
+            eprintln!("thread {i} received {value:#x}");
+            next_tx.send(value).unwrap();
+        }));
+        rx = next_rx;
+    }
+
+    let value = 0xCAFE;
+    eprintln!("send value {value:#x} to threads");
+    tx.send(value).unwrap();
+
+    for thread in threads {
+        thread.join().unwrap();
+    }
+
+    Ok(())
+}
+
 fn clone_grant_using_fmap_test() -> Result<()> {
     clone_grant_using_fmap_test_inner(false)
 }
@@ -713,6 +739,7 @@ fn main() {
     #[cfg(target_arch = "x86_64")]
     tests.insert("avx2", avx2_test);
     tests.insert("create_test", create_test);
+    tests.insert("channel", channel_test);
     tests.insert("page_fault", page_fault_test);
     #[cfg(target_arch = "x86_64")]
     tests.insert("switch", switch_test);
