@@ -11,7 +11,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use std::sync::atomic::{AtomicUsize, Ordering, compiler_fence};
 use std::fs::{File, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::fd::{IntoRawFd, FromRawFd, RawFd, AsRawFd};
 use std::process::Command;
 use std::net::TcpStream;
@@ -732,6 +732,29 @@ fn efault_test() -> Result<()> {
 
     Ok(())
 }
+fn pipe() -> [File; 2] {
+    let mut fds = [0; 2];
+    assert_ne!(unsafe { libc::pipe(fds.as_mut_ptr()) }, -1);
+    fds.map(|f| unsafe { File::from_raw_fd(f) })
+}
+
+pub fn filetable_leak() -> Result<()> {
+    // Relies on the fact that readers of a pipe are always awoken when the writer is closed.
+    let [mut reader, writer] = pipe();
+    let first_child = unsafe { libc::fork() };
+    assert_ne!(first_child, -1);
+
+    if first_child == 0 {
+        drop(reader);
+        let _ft = File::open("thisproc:current/filetable")?;
+        std::process::exit(0);
+    } else {
+        drop(writer);
+        assert_eq!(reader.read_exact(&mut [0]).unwrap_err().kind(), std::io::ErrorKind::UnexpectedEof);
+    }
+
+    Ok(())
+}
 
 fn main() {
 
@@ -763,6 +786,7 @@ fn main() {
     tests.insert("redoxfs_range_bookkeeping", redoxfs_range_bookkeeping);
     tests.insert("eintr", eintr::eintr);
     tests.insert("syscall_bench", syscall_bench::bench);
+    tests.insert("filetable_leak", filetable_leak);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {
