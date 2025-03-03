@@ -6,7 +6,6 @@ use syscall::{
     Error,
     close,
     EIO,
-    pipe2,
     read,
     write,
     SchemeMut,
