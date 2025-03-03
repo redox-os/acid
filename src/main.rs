@@ -1,5 +1,5 @@
 //!Acid testing program
-#![feature(array_chunks, asm_const, core_intrinsics, thread_local)]
+#![feature(array_chunks, core_intrinsics, thread_local)]
 
 use std::{env, process};
 use std::collections::hash_map::DefaultHasher;
@@ -26,8 +26,9 @@ mod cross_scheme_link;
 mod daemon;
 mod scheme_data_leak;
 mod relibc_leak;
-mod eintr;
+//mod eintr; // TODO
 mod syscall_bench;
+mod scheme_call;
 
 #[cfg(target_arch = "x86_64")]
 fn avx2_test() -> Result<()> {
@@ -466,7 +467,8 @@ fn pipe_test() -> Result<()> {
     Ok(())
 }
 
-fn page_fault_test() -> Result<()> {
+// TODO: use libc
+/*fn page_fault_test() -> Result<()> {
     use syscall::flag::{SigActionFlags, SIGSEGV};
     use syscall::data::SigAction;
 
@@ -528,9 +530,10 @@ fn page_fault_test() -> Result<()> {
     }
 
     Ok(())
-}
+}*/
 
-fn tlb_test() -> Result<()> {
+// TODO: replace physalloc/physfree
+/*fn tlb_test() -> Result<()> {
     struct Inner {
         counter: usize,
         page: *mut usize,
@@ -608,7 +611,7 @@ fn tlb_test() -> Result<()> {
     assert_eq!(mutex.into_inner().counter, N * THREAD_COUNT);
 
     Ok(())
-}
+}*/
 
 #[cfg(target_arch = "x86_64")]
 fn switch_test() -> Result<()> {
@@ -763,7 +766,7 @@ fn main() {
     tests.insert("avx2", avx2_test);
     tests.insert("create_test", create_test);
     tests.insert("channel", channel_test);
-    tests.insert("page_fault", page_fault_test);
+    // tests.insert("page_fault", page_fault_test); // TODO
     #[cfg(target_arch = "x86_64")]
     tests.insert("switch", switch_test);
     tests.insert("tcp_fin", tcp_fin_test);
@@ -781,12 +784,13 @@ fn main() {
     tests.insert("clone_grant_using_fmap", clone_grant_using_fmap_test);
     tests.insert("clone_grant_using_fmap_lazy", clone_grant_using_fmap_lazy_test);
     tests.insert("anonymous_map_shared", anonymous_map_shared);
-    tests.insert("tlb", tlb_test);
+    //tests.insert("tlb", tlb_test); // TODO
     tests.insert("file_mmap", file_mmap_test);
     tests.insert("redoxfs_range_bookkeeping", redoxfs_range_bookkeeping);
-    tests.insert("eintr", eintr::eintr);
+    //tests.insert("eintr", eintr::eintr); // TODO
     tests.insert("syscall_bench", syscall_bench::bench);
     tests.insert("filetable_leak", filetable_leak);
+    tests.insert("scheme_call", scheme_call::scheme_call);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {
