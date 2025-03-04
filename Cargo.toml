@@ -7,8 +7,8 @@ edition = "2021"
 [dependencies]
 libc = "0.2"
 spin = "0.9"
-redox_syscall = { git = "https://gitlab.redox-os.org/redox-os/syscall.git", branch = "master", features = ["std"] }
-redox-scheme = { git = "https://gitlab.redox-os.org/4lDO2/redox-scheme", branch = "asyncv3" }
+redox_syscall = { version = "0.5.10", features = ["std"] }
+redox-scheme = "0.5"
 anyhow = "1.0.81"
 
 #strace = { git = "https://gitlab.redox-os.org/redox-os/strace-redox", default-features = false }
@@ -16,6 +16,3 @@ anyhow = "1.0.81"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86 = "0.47.0"
-
-[patch.crates-io]
-redox_syscall = { git = "https://gitlab.redox-os.org/redox-os/syscall.git", branch = "master" }
