@@ -158,6 +158,7 @@ fn clone_grant_using_fmap_test_inner(lazy: bool) -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_arch = "x86_64")]
 fn redoxfs_range_bookkeeping() -> Result<()> {
     // Number of pages
     const P: usize = 128;
@@ -786,6 +787,7 @@ fn main() {
     tests.insert("anonymous_map_shared", anonymous_map_shared);
     //tests.insert("tlb", tlb_test); // TODO
     tests.insert("file_mmap", file_mmap_test);
+    #[cfg(target_arch = "x86_64")]
     tests.insert("redoxfs_range_bookkeeping", redoxfs_range_bookkeeping);
     //tests.insert("eintr", eintr::eintr); // TODO
     tests.insert("syscall_bench", syscall_bench::bench);
