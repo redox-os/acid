@@ -759,14 +759,22 @@ pub fn filetable_leak() -> Result<()> {
 
     Ok(())
 }
-fn fork_serial_bench() -> Result<()> {
+fn fork_serial_bench<const EXEC: bool>() -> Result<()> {
     let now = Instant::now();
 
     for _ in 0..1 << 10 {
         let code = unsafe { libc::fork() };
         assert_ne!(code, -1);
         if code == 0 {
-            std::process::exit(0);
+            if EXEC {
+                unsafe {
+                    let s = c"/usr/bin/true";
+                    libc::execv(s.as_ptr(), [s.as_ptr(), core::ptr::null()].as_ptr());
+                    unreachable!();
+                }
+            } else {
+                std::process::exit(0);
+            }
         }
         unsafe { libc::waitpid(code, &mut 0, 0); }
     }
@@ -774,7 +782,7 @@ fn fork_serial_bench() -> Result<()> {
     println!("TIME: {:?}", now.elapsed());
     Ok(())
 }
-fn fork_tree_bench() -> Result<()> {
+fn fork_tree_bench<const EXEC: bool>() -> Result<()> {
     let mut is_parent = true;
     let now = Instant::now();
 
@@ -787,7 +795,15 @@ fn fork_tree_bench() -> Result<()> {
     }
 
     if !is_parent {
-        std::process::exit(0);
+        if EXEC {
+            unsafe {
+                let s = c"/usr/bin/true";
+                libc::execv(s.as_ptr(), [s.as_ptr(), core::ptr::null()].as_ptr());
+                unreachable!();
+            }
+        } else {
+            std::process::exit(0);
+        }
     }
     println!("TIME: {:?}", now.elapsed());
     Ok(())
@@ -826,8 +842,10 @@ fn main() {
     tests.insert("syscall_bench", syscall_bench::bench);
     tests.insert("filetable_leak", filetable_leak);
     tests.insert("scheme_call", scheme_call::scheme_call);
-    tests.insert("fork_tree_bench", fork_tree_bench);
-    tests.insert("fork_serial_bench", fork_serial_bench);
+    tests.insert("fork_tree_bench", fork_tree_bench::<false>);
+    tests.insert("fork_serial_bench", fork_serial_bench::<false>);
+    tests.insert("fork_exec_serial_bench", fork_serial_bench::<true>);
+    tests.insert("fork_exec_tree_bench", fork_tree_bench::<true>);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {
