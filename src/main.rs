@@ -17,7 +17,7 @@ use std::os::fd::{IntoRawFd, FromRawFd, RawFd, AsRawFd};
 use std::process::Command;
 use std::net::TcpStream;
 
-use libc::O_RDWR;
+use libc::{O_RDWR, c_int};
 use syscall::{O_CLOEXEC, Map, MapFlags, ADDRSPACE_OP_MMAP, ADDRSPACE_OP_MUNMAP};
 use syscall::O_RDONLY;
 use syscall::PAGE_SIZE;
@@ -785,8 +785,10 @@ fn openat_test() -> Result<()> {
         Ok(())
     }
 
-    let path = "/tmp/acid_tmp_dir";
-    let raw_fd = unsafe { libc::mkdir(CString::new(path).unwrap().as_ptr(), O_RDWR as _) };
+    let path = "/openat_test";
+    // TODO: use mkdir
+    // let raw_fd = unsafe { libc::mkdir(CString::new(path).unwrap().as_ptr(), O_RDWR as _) };
+    let raw_fd = syscall::open(path, (O_RDWR | O_CLOEXEC as c_int) as _).unwrap() as _;
 
     create_file_test(raw_fd, &path, "tmp1", b"Temporary File Content 1").unwrap();
     create_file_test(raw_fd, &path, "tmp2", b"Temporary File Content 2").unwrap();
