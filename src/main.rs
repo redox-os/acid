@@ -759,6 +759,39 @@ pub fn filetable_leak() -> Result<()> {
 
     Ok(())
 }
+fn fork_serial_bench() -> Result<()> {
+    let now = Instant::now();
+
+    for _ in 0..1 << 10 {
+        let code = unsafe { libc::fork() };
+        assert_ne!(code, -1);
+        if code == 0 {
+            std::process::exit(0);
+        }
+        unsafe { libc::waitpid(code, &mut 0, 0); }
+    }
+
+    println!("TIME: {:?}", now.elapsed());
+    Ok(())
+}
+fn fork_tree_bench() -> Result<()> {
+    let mut is_parent = true;
+    let now = Instant::now();
+
+    let mut pids = [0; 10];
+
+    for i in 0..10 {
+        pids[i] = unsafe { libc::fork() };
+        assert_ne!(pids[i], -1, "failed {}", unsafe { libc::__errno_location().read() });
+        is_parent &= pids[i] != 0;
+    }
+
+    if !is_parent {
+        std::process::exit(0);
+    }
+    println!("TIME: {:?}", now.elapsed());
+    Ok(())
+}
 
 fn main() {
 
@@ -793,6 +826,8 @@ fn main() {
     tests.insert("syscall_bench", syscall_bench::bench);
     tests.insert("filetable_leak", filetable_leak);
     tests.insert("scheme_call", scheme_call::scheme_call);
+    tests.insert("fork_tree_bench", fork_tree_bench);
+    tests.insert("fork_serial_bench", fork_serial_bench);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {
