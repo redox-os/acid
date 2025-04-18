@@ -1,6 +1,7 @@
 //!Acid testing program
 #![feature(array_chunks, core_intrinsics, thread_local)]
 
+use std::ffi::CString;
 use std::{env, process};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
@@ -16,6 +17,7 @@ use std::os::fd::{IntoRawFd, FromRawFd, RawFd, AsRawFd};
 use std::process::Command;
 use std::net::TcpStream;
 
+use libc::O_RDWR;
 use syscall::{O_CLOEXEC, Map, MapFlags, ADDRSPACE_OP_MMAP, ADDRSPACE_OP_MUNMAP};
 use syscall::O_RDONLY;
 use syscall::PAGE_SIZE;
@@ -759,6 +761,51 @@ pub fn filetable_leak() -> Result<()> {
     Ok(())
 }
 
+fn openat_test() -> Result<()> {
+    fn create_file_test(raw_fd: libc::c_int, folder_path: &str, file_path: &str, content: &[u8]) -> Result<()>  {
+        let full_path = {   
+            let full_path = format!("{}/{}", folder_path, file_path);
+            let mut file: File = File::create(&full_path)?;
+            file.write(content)?;
+            file.flush()?;
+            full_path
+        };
+
+        let file_fd = syscall::openat(raw_fd as _, file_path, O_RDONLY | O_CLOEXEC)?;
+        let mut file: File = unsafe { File::from_raw_fd(file_fd as RawFd) };
+        let mut buffer = Vec::new();
+        let read = file.read(&mut buffer)?;
+        let _ = syscall::close(file_fd);
+
+        assert_eq!(read, content.len());
+        assert_eq!(&buffer, content);
+        std::fs::remove_file(&full_path)?;
+
+        Ok(())
+    }
+
+    let path = "/tmp/acid_tmp_dir";
+    let raw_fd = unsafe { libc::mkdir(CString::new(path).unwrap().as_ptr(), O_RDWR as _) };
+
+    create_file_test(raw_fd, &path, "tmp1", b"Temporary File Content 1").unwrap();
+    create_file_test(raw_fd, &path, "tmp2", b"Temporary File Content 2").unwrap();
+    create_file_test(raw_fd, &path, "tmp3", b"Temporary File Content 3").unwrap();
+
+    // Error case - invalid directory fd
+    let invalid_fd = create_file_test(999999, "", "", b"");
+    assert!(invalid_fd.is_err());
+
+    // Error case - non-existent file
+    let non_existent = syscall::openat(raw_fd as _, "non_existent", O_RDONLY | O_CLOEXEC);
+    assert!(non_existent.is_err());
+
+    // Cleanup
+    let _ = syscall::close(raw_fd as _);
+    std::fs::remove_dir(&path)?;
+
+    Ok(())
+}
+
 fn main() {
 
     let mut tests: HashMap<&'static str, fn() -> Result<()>> = HashMap::new();
@@ -791,6 +838,7 @@ fn main() {
     tests.insert("syscall_bench", syscall_bench::bench);
     tests.insert("filetable_leak", filetable_leak);
     tests.insert("scheme_call", scheme_call::scheme_call);
+    tests.insert("openat", openat_test);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {
