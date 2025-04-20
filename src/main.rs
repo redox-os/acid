@@ -907,6 +907,7 @@ fn main() {
     tests.insert("fork_exec_serial_bench", proc::fork_serial_bench::<true>);
     tests.insert("fork_exec_tree_bench", proc::fork_tree_bench::<true>);
     tests.insert("stop_orphan_pgrp", proc::stop_orphan_pgrp);
+    tests.insert("reparenting", proc::reparenting);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {

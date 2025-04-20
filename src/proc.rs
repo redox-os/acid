@@ -2,6 +2,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use nix::errno::Errno;
 use nix::sys::signal::{self, Signal};
 use nix::sys::wait::{self, WaitPidFlag, WaitStatus};
 use nix::unistd::{self, ForkResult, Pid};
@@ -57,6 +58,43 @@ pub fn fork_tree_bench<const EXEC: bool>() -> Result<()> {
         }
     }
     println!("TIME: {:?}", now.elapsed());
+    Ok(())
+}
+
+pub fn reparenting() -> Result<()> {
+    // Check that all children of a process are reparented to init, regardless of session or proc
+    // group.
+
+    match unsafe { unistd::fork()? } {
+        ForkResult::Child => (),
+        ForkResult::Parent {
+            child: child_parent,
+        } => {
+            thread::sleep(Duration::from_millis(100));
+            signal::kill(child_parent, Signal::SIGTERM)?;
+
+            let res = wait::waitpid(None, Some(WaitPidFlag::WUNTRACED | WaitPidFlag::WCONTINUED))?;
+            // TODO: check returned signal?
+            assert!(matches!(res, WaitStatus::Exited(c, _) if c == child_parent));
+
+            let res = wait::waitpid(None, Some(WaitPidFlag::WUNTRACED | WaitPidFlag::WCONTINUED));
+            assert_eq!(res, Err(Errno::ECHILD), "children remain!");
+        }
+    }
+
+    let ForkResult::Parent { .. } = (unsafe { unistd::fork()? }) else {
+        // first child waits forever (a long time)
+        unistd::setpgid(Pid::from_raw(0), Pid::from_raw(0)).unwrap();
+        thread::sleep(Duration::MAX);
+        std::process::exit(42);
+    };
+    let ForkResult::Parent { .. } = (unsafe { unistd::fork()? }) else {
+        unistd::setsid().unwrap();
+        thread::sleep(Duration::MAX);
+        std::process::exit(1337);
+    };
+    // TODO: Check that init killed them?
+
     Ok(())
 }
 
