@@ -98,6 +98,126 @@ pub fn reparenting() -> Result<()> {
     Ok(())
 }
 
+pub fn setpgid() -> Result<()> {
+    #[derive(Debug)]
+    enum Case {
+        SessionLeader,
+        DifferentSession,
+        ModifyParent,
+        NewPgidNotPid,
+        HasRunExec,
+        SetFromChild,
+    }
+
+    fn inner(case: Case) -> Result<()> {
+        println!("Testing setpgid case {case:?}");
+        if let ForkResult::Parent { child: wrapper } = unsafe { unistd::fork()? } {
+            assert_eq!(
+                wait::waitpid(wrapper, Some(WaitPidFlag::empty()))?,
+                WaitStatus::Exited(wrapper, 0)
+            );
+            return Ok(());
+        }
+
+        let parent = unistd::getpid();
+
+        match case {
+            Case::SessionLeader => {
+                unistd::setsid()?;
+                // is a session leader (even though it would have been a no-op anyway)
+                assert_eq!(unistd::setpgid(parent, parent), Err(Errno::EPERM));
+                std::process::exit(0);
+            }
+            _ => (),
+        }
+
+        let ForkResult::Parent { child } = (unsafe { unistd::fork()? }) else {
+            let child = unistd::getpid();
+            match case {
+                Case::DifferentSession => {
+                    unistd::setsid()?;
+                }
+                Case::HasRunExec => {
+                    unistd::execv(c"/usr/bin/sleep", &[c"/usr/bin/sleep", c"999999"])?;
+                }
+                Case::SessionLeader => unreachable!(),
+                Case::ModifyParent => {
+                    // can only modify children
+                    assert_eq!(unistd::setpgid(parent, child), Err(Errno::ESRCH));
+                    std::process::exit(0);
+                }
+                Case::NewPgidNotPid => (),
+                Case::SetFromChild => {
+                    unistd::setpgid(child, child)?;
+                }
+            }
+            thread::sleep(Duration::MAX);
+            std::process::exit(0);
+        };
+        thread::sleep(Duration::from_millis(100));
+        match case {
+            Case::HasRunExec => {
+                assert_eq!(unistd::setpgid(child, child), Err(Errno::EACCES));
+                signal::kill(child, Signal::SIGTERM)?;
+                assert_eq!(
+                    wait::waitpid(child, Some(WaitPidFlag::empty()))?,
+                    WaitStatus::Signaled(child, Signal::SIGTERM, false)
+                );
+            }
+            Case::SessionLeader => unreachable!(),
+            Case::ModifyParent => {
+                assert_eq!(
+                    wait::waitpid(child, Some(WaitPidFlag::empty()))?,
+                    WaitStatus::Exited(child, 0)
+                );
+            }
+            Case::DifferentSession => {
+                assert_eq!(unistd::setpgid(child, child), Err(Errno::EPERM));
+                signal::kill(child, Signal::SIGTERM)?;
+                assert_eq!(
+                    wait::waitpid(child, Some(WaitPidFlag::empty()))?,
+                    WaitStatus::Signaled(child, Signal::SIGTERM, false)
+                );
+            }
+            Case::NewPgidNotPid => {
+                // forbidden
+                assert_eq!(unistd::setpgid(parent, child), Err(Errno::EPERM));
+
+                // allowed
+                assert_eq!(unistd::setpgid(child, child), Ok(()));
+                assert_eq!(unistd::getpgid(Some(child))?, child);
+
+                signal::kill(child, Signal::SIGTERM)?;
+                assert_eq!(
+                    wait::waitpid(child, Some(WaitPidFlag::empty()))?,
+                    WaitStatus::Signaled(child, Signal::SIGTERM, false)
+                );
+            }
+            Case::SetFromChild => {
+                assert_eq!(unistd::getpgid(Some(child))?, child);
+                signal::kill(child, Signal::SIGTERM)?;
+                assert_eq!(
+                    wait::waitpid(child, Some(WaitPidFlag::empty()))?,
+                    WaitStatus::Signaled(child, Signal::SIGTERM, false)
+                );
+            }
+        }
+        std::process::exit(0);
+    }
+    let cases = [
+        Case::SessionLeader,
+        Case::DifferentSession,
+        Case::ModifyParent,
+        Case::NewPgidNotPid,
+        Case::SetFromChild,
+        //Case::HasRunExec, FIXME
+    ];
+    for case in cases {
+        inner(case)?;
+    }
+    Ok(())
+}
+
 pub fn stop_orphan_pgrp() -> Result<()> {
     #[derive(Debug)]
     enum Case {
