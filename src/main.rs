@@ -1,5 +1,5 @@
 //!Acid testing program
-#![feature(array_chunks, core_intrinsics, thread_local)]
+#![feature(array_chunks, core_intrinsics, let_chains, thread_local)]
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
@@ -841,7 +841,7 @@ fn efault_test() -> Result<()> {
 
     Ok(())
 }
-fn pipe() -> [File; 2] {
+pub(crate) fn pipe() -> [File; 2] {
     let mut fds = [0; 2];
     assert_ne!(unsafe { libc::pipe(fds.as_mut_ptr()) }, -1);
     fds.map(|f| unsafe { File::from_raw_fd(f) })
@@ -911,6 +911,7 @@ fn main() {
     tests.insert("setsid", proc::setsid);
     tests.insert("reparenting", proc::reparenting);
     tests.insert("waitpid_setpgid_echild", proc::waitpid_setpgid_echild);
+    tests.insert("thread_reap", proc::thread_reap);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {

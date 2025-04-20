@@ -1,3 +1,6 @@
+use std::fs::File;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::os::fd::AsRawFd;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -322,6 +325,102 @@ pub fn stop_orphan_pgrp() -> Result<()> {
             inner(sig, Case::SameGrp)?;
         }
     }
+    Ok(())
+}
+pub fn thread_reap() -> Result<()> {
+    #[derive(Debug)]
+    enum Case {
+        Exit,
+        PthreadExit,
+    }
+    fn parse_ps(path: &str) -> Result<Vec<Vec<String>>> {
+        BufReader::new(File::open(path)?)
+            .lines()
+            .map(|l_res| {
+                let l = l_res?;
+                Ok(l.split(' ')
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
+                    .collect::<Vec<String>>())
+            })
+            .collect::<Result<Vec<_>>>()
+    }
+    fn inner(case: Case) -> Result<()> {
+        println!("Testing {case:?}");
+        let [mut read_fd, write_fd] = crate::pipe();
+        unsafe {
+            assert_ne!(
+                libc::fcntl(read_fd.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK),
+                -1
+            );
+        }
+
+        match unsafe { unistd::fork()? } {
+            ForkResult::Child => thread::scope(|scope| {
+                drop(read_fd);
+
+                let threads = (0..16)
+                    .map(|_| {
+                        scope.spawn(|| {
+                            thread::sleep(Duration::from_millis(200));
+                            let _ = (&write_fd).write(&[1]).unwrap();
+                            unsafe {
+                                libc::pthread_exit(core::ptr::null_mut());
+                            }
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                thread::sleep(Duration::from_millis(100));
+
+                // detach threads
+                drop(threads);
+                match case {
+                    // other threads should be reaped
+                    Case::Exit => std::process::exit(0),
+                    // other threads will need to exit themselves
+                    Case::PthreadExit => unsafe { libc::pthread_exit(core::ptr::null_mut()) },
+                }
+            }),
+            ForkResult::Parent { child } => {
+                assert_eq!(
+                    wait::waitpid(child, Some(WaitPidFlag::empty())),
+                    Ok(WaitStatus::Exited(child, 0))
+                );
+                match case {
+                    Case::Exit => {
+                        let error = read_fd.read(&mut [0]).expect_err("pipe was nonempty");
+                        assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+                    }
+                    Case::PthreadExit => {
+                        let mut buf = [0_u8; 16];
+                        read_fd.read_exact(&mut buf).unwrap();
+                        assert_eq!(buf, [1_u8; 16]);
+                    }
+                }
+                drop(write_fd);
+                for ref line in parse_ps("/scheme/sys/context")? {
+                    let Some(line_f) = line.first() else {
+                        continue;
+                    };
+                    let Ok(line_pid) = line_f.parse() else {
+                        continue;
+                    };
+                    if child.as_raw() == line_pid {
+                        panic!(
+                            "thread remained for pid {}, (ps {:?})",
+                            child.as_raw(),
+                            line
+                        );
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    inner(Case::Exit)?;
+    inner(Case::PthreadExit)?;
     Ok(())
 }
 pub fn waitpid_setpgid_echild() -> Result<()> {
