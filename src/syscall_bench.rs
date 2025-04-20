@@ -26,4 +26,6 @@ pub fn bench() -> anyhow::Result<()> {
     Ok(())
 }
 #[cfg(not(target_arch = "x86_64"))]
-pub fn bench() -> anyhow::Result<()> { Ok(()) }
+pub fn bench() -> anyhow::Result<()> {
+    Ok(())
+}

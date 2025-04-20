@@ -10,6 +10,7 @@ spin = "0.9"
 redox_syscall = { version = "0.5.10", features = ["std"] }
 redox-scheme = "0.5"
 anyhow = "1.0.81"
+nix = { version = "0.29.0", features = ["process", "signal"] }
 
 #strace = { git = "https://gitlab.redox-os.org/redox-os/strace-redox", default-features = false }
 #strace = { path = "../../strace/source", default-features = false }

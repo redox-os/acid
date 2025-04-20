@@ -1,34 +1,35 @@
 //!Acid testing program
 #![feature(array_chunks, core_intrinsics, thread_local)]
 
-use std::{env, process};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
 use std::hash::Hasher;
+use std::io::{Read, Write};
+use std::net::TcpStream;
+use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
 use std::os::unix::thread::JoinHandleExt;
+use std::process::Command;
+use std::sync::atomic::{compiler_fence, AtomicUsize, Ordering};
 use std::sync::Barrier;
 use std::thread;
 use std::time::{Duration, Instant};
-use std::sync::atomic::{AtomicUsize, Ordering, compiler_fence};
-use std::fs::{File, OpenOptions};
-use std::io::{Read, Write};
-use std::os::fd::{IntoRawFd, FromRawFd, RawFd, AsRawFd};
-use std::process::Command;
-use std::net::TcpStream;
+use std::{env, process};
 
-use syscall::{O_CLOEXEC, Map, MapFlags, ADDRSPACE_OP_MMAP, ADDRSPACE_OP_MUNMAP};
 use syscall::O_RDONLY;
 use syscall::PAGE_SIZE;
+use syscall::{Map, MapFlags, ADDRSPACE_OP_MMAP, ADDRSPACE_OP_MUNMAP, O_CLOEXEC};
 
 use anyhow::{bail, Result};
 
 mod cross_scheme_link;
 mod daemon;
-mod scheme_data_leak;
-mod relibc_leak;
 //mod eintr; // TODO
-mod syscall_bench;
+mod proc;
+mod relibc_leak;
 mod scheme_call;
+mod scheme_data_leak;
+mod syscall_bench;
 
 #[cfg(target_arch = "x86_64")]
 fn avx2_test() -> Result<()> {
@@ -63,7 +64,10 @@ fn create_test() -> Result<()> {
     test_file.push("test_file");
     let test_file_err = fs::File::create(&test_file).err().map(|err| err.kind());
     if test_file_err != Some(io::ErrorKind::NotFound) {
-        bail!("Incorrect open error: {:?}, should be NotFound", test_file_err);
+        bail!(
+            "Incorrect open error: {:?}, should be NotFound",
+            test_file_err
+        );
     }
 
     fs::create_dir(&test_dir)?;
@@ -141,16 +145,37 @@ fn test_shared_ref(shared_ref: &AtomicUsize) {
         assert_eq!(shared_ref.load(Ordering::SeqCst), 2);
     } else {
         let _ = syscall::read(read_fd1, &mut [0]).unwrap();
-        assert_eq!(shared_ref.compare_exchange(0xDEADBEEF, 2, Ordering::SeqCst, Ordering::SeqCst), Ok(0xDEADBEEF));
+        assert_eq!(
+            shared_ref.compare_exchange(0xDEADBEEF, 2, Ordering::SeqCst, Ordering::SeqCst),
+            Ok(0xDEADBEEF)
+        );
         let _ = syscall::write(write_fd2, &[0]).unwrap();
     }
 }
 
 fn clone_grant_using_fmap_test_inner(lazy: bool) -> Result<()> {
-    let lazy_flag = if lazy { MapFlags::MAP_LAZY } else { MapFlags::empty() };
+    let lazy_flag = if lazy {
+        MapFlags::MAP_LAZY
+    } else {
+        MapFlags::empty()
+    };
 
     let mem = syscall::open("shm:clone_grant_using_fmap_test", O_CLOEXEC).unwrap();
-    let base_ptr = unsafe { syscall::fmap(mem, &Map { address: 0, size: PAGE_SIZE, flags: MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_SHARED | lazy_flag, offset: 0 }).unwrap() };
+    let base_ptr = unsafe {
+        syscall::fmap(
+            mem,
+            &Map {
+                address: 0,
+                size: PAGE_SIZE,
+                flags: MapFlags::PROT_READ
+                    | MapFlags::PROT_WRITE
+                    | MapFlags::MAP_SHARED
+                    | lazy_flag,
+                offset: 0,
+            },
+        )
+        .unwrap()
+    };
     let shared_ref: &'static AtomicUsize = unsafe { &*(base_ptr as *const AtomicUsize) };
 
     test_shared_ref(shared_ref);
@@ -163,12 +188,17 @@ fn redoxfs_range_bookkeeping() -> Result<()> {
     // Number of pages
     const P: usize = 128;
 
-    let mut chunks = vec! [false; P];
+    let mut chunks = vec![false; P];
 
     // Number of operations
     const N: usize = 10000;
 
-    let file = OpenOptions::new().create(true).write(true).read(true).open("tmp").unwrap();
+    let file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .read(true)
+        .open("tmp")
+        .unwrap();
     file.set_len((P * PAGE_SIZE) as u64).unwrap();
     let fd = file.into_raw_fd() as usize;
 
@@ -176,7 +206,9 @@ fn redoxfs_range_bookkeeping() -> Result<()> {
 
     fn rand() -> usize {
         let ret: usize;
-        unsafe { core::arch::asm!("rdrand {}", out(reg) ret); }
+        unsafe {
+            core::arch::asm!("rdrand {}", out(reg) ret);
+        }
         ret
     }
 
@@ -186,7 +218,13 @@ fn redoxfs_range_bookkeeping() -> Result<()> {
         let idx = n % P;
 
         if insert_not_remove {
-            let Some((first_unused, _)) = chunks.iter().copied().enumerate().filter(|&(_, c)| !c).nth(idx) else {
+            let Some((first_unused, _)) = chunks
+                .iter()
+                .copied()
+                .enumerate()
+                .filter(|&(_, c)| !c)
+                .nth(idx)
+            else {
                 continue;
             };
             chunks[first_unused] = true;
@@ -194,15 +232,28 @@ fn redoxfs_range_bookkeeping() -> Result<()> {
             println!("INS {}", first_unused);
 
             unsafe {
-                let _ = syscall::fmap(fd, &Map {
-                    address: 0xDEADB000 + first_unused * PAGE_SIZE,
-                    offset: first_unused * PAGE_SIZE,
-                    flags: MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_SHARED | MapFlags::MAP_FIXED,
-                    size: PAGE_SIZE,
-                }).expect("failed to fmap");
+                let _ = syscall::fmap(
+                    fd,
+                    &Map {
+                        address: 0xDEADB000 + first_unused * PAGE_SIZE,
+                        offset: first_unused * PAGE_SIZE,
+                        flags: MapFlags::PROT_READ
+                            | MapFlags::PROT_WRITE
+                            | MapFlags::MAP_SHARED
+                            | MapFlags::MAP_FIXED,
+                        size: PAGE_SIZE,
+                    },
+                )
+                .expect("failed to fmap");
             }
         } else {
-            let Some((first_used, _)) = chunks.iter().copied().enumerate().filter(|&(_, c)| c).nth(idx) else {
+            let Some((first_used, _)) = chunks
+                .iter()
+                .copied()
+                .enumerate()
+                .filter(|&(_, c)| c)
+                .nth(idx)
+            else {
                 continue;
             };
             chunks[first_used] = false;
@@ -210,7 +261,8 @@ fn redoxfs_range_bookkeeping() -> Result<()> {
             println!("REM {}", first_used);
 
             unsafe {
-                syscall::funmap(0xDEADB000 + first_used * PAGE_SIZE, PAGE_SIZE).expect("failed to funmap");
+                syscall::funmap(0xDEADB000 + first_used * PAGE_SIZE, PAGE_SIZE)
+                    .expect("failed to funmap");
             }
         }
     }
@@ -219,15 +271,38 @@ fn redoxfs_range_bookkeeping() -> Result<()> {
 }
 
 fn file_mmap_test() -> Result<()> {
-    let file = OpenOptions::new().read(true).write(true).create(true).open("acid_tmp_file").unwrap();
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open("acid_tmp_file")
+        .unwrap();
     let fd = file.into_raw_fd() as usize;
 
     let buf = unsafe {
-        let ptr = syscall::fmap(fd, &Map { address: 0, size: 16384 + 127, flags: MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_SHARED, offset: 0 }).unwrap();
+        let ptr = syscall::fmap(
+            fd,
+            &Map {
+                address: 0,
+                size: 16384 + 127,
+                flags: MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_SHARED,
+                offset: 0,
+            },
+        )
+        .unwrap();
         core::slice::from_raw_parts_mut(ptr as *mut u8, 16384 + 127)
     };
     let buf2 = unsafe {
-        let ptr = syscall::fmap(fd, &Map { address: 0, size: 1337, flags: MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_SHARED, offset: 3 * 4096 }).unwrap();
+        let ptr = syscall::fmap(
+            fd,
+            &Map {
+                address: 0,
+                size: 1337,
+                flags: MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_SHARED,
+                offset: 3 * 4096,
+            },
+        )
+        .unwrap();
         core::slice::from_raw_parts_mut(ptr as *mut u8, 1337)
     };
 
@@ -263,7 +338,6 @@ fn file_mmap_test() -> Result<()> {
         functions[k](buf);
     }
 
-
     let parent_memory = File::open("thisproc:current/addrspace").unwrap();
 
     unsafe {
@@ -288,18 +362,24 @@ fn file_mmap_test() -> Result<()> {
             ];
 
             dbg!();
-            child_memory.write(core::slice::from_raw_parts(words.as_ptr().cast(), words.len() * core::mem::size_of::<usize>())).unwrap();
+            child_memory
+                .write(core::slice::from_raw_parts(
+                    words.as_ptr().cast(),
+                    words.len() * core::mem::size_of::<usize>(),
+                ))
+                .unwrap();
             dbg!();
 
             let _ = syscall::write(pipes1[1] as usize, &[1]).unwrap();
             dbg!();
 
-            let words = [
-                ADDRSPACE_OP_MUNMAP,
-                0xDEADB000,
-                4096,
-            ];
-            child_memory.write(core::slice::from_raw_parts(words.as_ptr().cast(), words.len() * core::mem::size_of::<usize>())).unwrap();
+            let words = [ADDRSPACE_OP_MUNMAP, 0xDEADB000, 4096];
+            child_memory
+                .write(core::slice::from_raw_parts(
+                    words.as_ptr().cast(),
+                    words.len() * core::mem::size_of::<usize>(),
+                ))
+                .unwrap();
 
             let _ = syscall::write(pipes2[1] as usize, &[1]).unwrap();
             dbg!();
@@ -308,7 +388,10 @@ fn file_mmap_test() -> Result<()> {
         } else {
             dbg!();
             let _ = syscall::read(pipes1[0] as usize, &mut [0]).unwrap();
-            assert_eq!(syscall::funmap(buf2.as_ptr() as usize, 4096), Err(syscall::Error::new(syscall::EBUSY)));
+            assert_eq!(
+                syscall::funmap(buf2.as_ptr() as usize, 4096),
+                Err(syscall::Error::new(syscall::EBUSY))
+            );
             dbg!();
             let _ = syscall::read(pipes2[0] as usize, &mut [0]).unwrap();
             assert_eq!(syscall::funmap(buf2.as_ptr() as usize, 4096), Ok(0));
@@ -329,7 +412,18 @@ fn file_mmap_test() -> Result<()> {
 }
 
 fn anonymous_map_shared() -> Result<()> {
-    let base_ptr = unsafe { syscall::fmap(!0, &Map { address: 0, size: PAGE_SIZE, flags: MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_SHARED, offset: 0 }).unwrap() };
+    let base_ptr = unsafe {
+        syscall::fmap(
+            !0,
+            &Map {
+                address: 0,
+                size: PAGE_SIZE,
+                flags: MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_SHARED,
+                offset: 0,
+            },
+        )
+        .unwrap()
+    };
     let shared_ref: &'static AtomicUsize = unsafe { &*(base_ptr as *const AtomicUsize) };
 
     test_shared_ref(shared_ref);
@@ -339,15 +433,16 @@ fn anonymous_map_shared() -> Result<()> {
 
 #[cfg(target_arch = "x86_64")]
 fn direction_flag_interrupt_test() -> Result<()> {
-    let thread = std::thread::spawn(|| {
-        unsafe {
-            core::arch::asm!("
+    let thread = std::thread::spawn(|| unsafe {
+        core::arch::asm!(
+            "
                 std
             2:
                 pause
                 jmp 2b
-            ", options(noreturn));
-        }
+            ",
+            options(noreturn)
+        );
     });
 
     std::thread::sleep(Duration::from_secs(1));
@@ -400,7 +495,7 @@ fn pipe_test() -> Result<()> {
 
     let barrier = Barrier::new(2);
 
-    let mut initial_buf = vec! [0_u8; 131768];
+    let mut initial_buf = vec![0_u8; 131768];
 
     for idx in 0..131768 {
         let mut hasher = DefaultHasher::new();
@@ -413,7 +508,8 @@ fn pipe_test() -> Result<()> {
     thread::scope(|scope| {
         let thread = scope.spawn(|| {
             // Saturate queue.
-            let bytes_written = syscall::write(write_fd, &vec! [0_u8; 65537]).expect("failed to write to pipe");
+            let bytes_written =
+                syscall::write(write_fd, &vec![0_u8; 65537]).expect("failed to write to pipe");
             assert_eq!(bytes_written, 65536);
 
             barrier.wait();
@@ -424,7 +520,7 @@ fn pipe_test() -> Result<()> {
 
             barrier.wait();
 
-            let mut buf = vec! [0_u8; 131768];
+            let mut buf = vec![0_u8; 131768];
 
             for i in 0..131768 {
                 buf.copy_from_slice(&initial_buf);
@@ -435,14 +531,16 @@ fn pipe_test() -> Result<()> {
                 let mut bytes_written = 0;
 
                 while bytes_written < i {
-                    bytes_written += syscall::write(write_fd, &buf[bytes_written..i]).expect("failed to write to pipe");
+                    bytes_written += syscall::write(write_fd, &buf[bytes_written..i])
+                        .expect("failed to write to pipe");
                 }
             }
         });
 
         barrier.wait();
 
-        let bytes_read = syscall::read(read_fd, &mut vec! [0_u8; 65537]).expect("failed to read from pipe");
+        let bytes_read =
+            syscall::read(read_fd, &mut vec![0_u8; 65537]).expect("failed to read from pipe");
         assert_eq!(bytes_read, 65536);
 
         let bytes_read = syscall::read(read_fd, &mut [0_u8]).expect("failed to read from pipe");
@@ -450,16 +548,21 @@ fn pipe_test() -> Result<()> {
 
         barrier.wait();
 
-        let mut buf = vec! [0_u8; 131768];
+        let mut buf = vec![0_u8; 131768];
 
         for i in 0..131768 {
             let mut bytes_read = 0;
 
             while bytes_read < i {
-                bytes_read += syscall::read(read_fd, &mut buf[bytes_read..i]).expect("failed to read from pipe");
+                bytes_read += syscall::read(read_fd, &mut buf[bytes_read..i])
+                    .expect("failed to read from pipe");
             }
 
-            assert!(buf[..i].iter().copied().enumerate().all(|(idx, byte)| byte == initial_buf[idx].wrapping_add(i as u8)));
+            assert!(buf[..i]
+                .iter()
+                .copied()
+                .enumerate()
+                .all(|(idx, byte)| byte == initial_buf[idx].wrapping_add(i as u8)));
         }
 
         thread.join().unwrap();
@@ -670,16 +773,20 @@ fn thread_test() -> Result<()> {
                     Command::new("ion")
                         .arg("-c")
                         .arg(&format!("echo {}:{}", i, j))
-                        .spawn().unwrap()
-                        .wait().unwrap();
+                        .spawn()
+                        .unwrap()
+                        .wait()
+                        .unwrap();
                 }));
             }
 
             Command::new("ion")
                 .arg("-c")
                 .arg(&format!("echo {}", i))
-                .spawn().unwrap()
-                .wait().unwrap();
+                .spawn()
+                .unwrap()
+                .wait()
+                .unwrap();
 
             for sub_thread in sub_threads {
                 let _ = sub_thread.join();
@@ -704,16 +811,16 @@ static mut TBSS_TEST_ZERO: usize = 0;
 static mut TDATA_TEST_NONZERO: usize = usize::max_value();
 
 fn tls_test() -> Result<()> {
-    thread::spawn(|| {
-        unsafe {
-            assert_eq!(TBSS_TEST_ZERO, 0);
-            TBSS_TEST_ZERO += 1;
-            assert_eq!(TBSS_TEST_ZERO, 1);
-            assert_eq!(TDATA_TEST_NONZERO, usize::max_value());
-            TDATA_TEST_NONZERO -= 1;
-            assert_eq!(TDATA_TEST_NONZERO, usize::max_value() - 1);
-        }
-    }).join().unwrap();
+    thread::spawn(|| unsafe {
+        assert_eq!(TBSS_TEST_ZERO, 0);
+        TBSS_TEST_ZERO += 1;
+        assert_eq!(TBSS_TEST_ZERO, 1);
+        assert_eq!(TDATA_TEST_NONZERO, usize::max_value());
+        TDATA_TEST_NONZERO -= 1;
+        assert_eq!(TDATA_TEST_NONZERO, usize::max_value() - 1);
+    })
+    .join()
+    .unwrap();
 
     unsafe {
         assert_eq!(TBSS_TEST_ZERO, 0);
@@ -729,9 +836,7 @@ fn tls_test() -> Result<()> {
 fn efault_test() -> Result<()> {
     use syscall::*;
 
-    let ret = unsafe {
-        syscall3(SYS_WRITE, 1, 0xdeadbeef, 0xfeedface)
-    };
+    let ret = unsafe { syscall3(SYS_WRITE, 1, 0xdeadbeef, 0xfeedface) };
     assert_eq!(ret, Err(Error::new(EFAULT)));
 
     Ok(())
@@ -754,63 +859,15 @@ pub fn filetable_leak() -> Result<()> {
         std::process::exit(0);
     } else {
         drop(writer);
-        assert_eq!(reader.read_exact(&mut [0]).unwrap_err().kind(), std::io::ErrorKind::UnexpectedEof);
+        assert_eq!(
+            reader.read_exact(&mut [0]).unwrap_err().kind(),
+            std::io::ErrorKind::UnexpectedEof
+        );
     }
 
     Ok(())
 }
-fn fork_serial_bench<const EXEC: bool>() -> Result<()> {
-    let now = Instant::now();
-
-    for _ in 0..1 << 10 {
-        let code = unsafe { libc::fork() };
-        assert_ne!(code, -1);
-        if code == 0 {
-            if EXEC {
-                unsafe {
-                    let s = c"/usr/bin/true";
-                    libc::execv(s.as_ptr(), [s.as_ptr(), core::ptr::null()].as_ptr());
-                    unreachable!();
-                }
-            } else {
-                std::process::exit(0);
-            }
-        }
-        unsafe { libc::waitpid(code, &mut 0, 0); }
-    }
-
-    println!("TIME: {:?}", now.elapsed());
-    Ok(())
-}
-fn fork_tree_bench<const EXEC: bool>() -> Result<()> {
-    let mut is_parent = true;
-    let now = Instant::now();
-
-    let mut pids = [0; 10];
-
-    for i in 0..10 {
-        pids[i] = unsafe { libc::fork() };
-        assert_ne!(pids[i], -1, "failed {}", unsafe { libc::__errno_location().read() });
-        is_parent &= pids[i] != 0;
-    }
-
-    if !is_parent {
-        if EXEC {
-            unsafe {
-                let s = c"/usr/bin/true";
-                libc::execv(s.as_ptr(), [s.as_ptr(), core::ptr::null()].as_ptr());
-                unreachable!();
-            }
-        } else {
-            std::process::exit(0);
-        }
-    }
-    println!("TIME: {:?}", now.elapsed());
-    Ok(())
-}
-
 fn main() {
-
     let mut tests: HashMap<&'static str, fn() -> Result<()>> = HashMap::new();
     #[cfg(target_arch = "x86_64")]
     tests.insert("avx2", avx2_test);
@@ -832,7 +889,10 @@ fn main() {
     tests.insert("scheme_data_leak", scheme_data_leak::scheme_data_leak_test);
     tests.insert("relibc_leak", relibc_leak::test);
     tests.insert("clone_grant_using_fmap", clone_grant_using_fmap_test);
-    tests.insert("clone_grant_using_fmap_lazy", clone_grant_using_fmap_lazy_test);
+    tests.insert(
+        "clone_grant_using_fmap_lazy",
+        clone_grant_using_fmap_lazy_test,
+    );
     tests.insert("anonymous_map_shared", anonymous_map_shared);
     //tests.insert("tlb", tlb_test); // TODO
     tests.insert("file_mmap", file_mmap_test);
@@ -842,10 +902,11 @@ fn main() {
     tests.insert("syscall_bench", syscall_bench::bench);
     tests.insert("filetable_leak", filetable_leak);
     tests.insert("scheme_call", scheme_call::scheme_call);
-    tests.insert("fork_tree_bench", fork_tree_bench::<false>);
-    tests.insert("fork_serial_bench", fork_serial_bench::<false>);
-    tests.insert("fork_exec_serial_bench", fork_serial_bench::<true>);
-    tests.insert("fork_exec_tree_bench", fork_tree_bench::<true>);
+    tests.insert("fork_tree_bench", proc::fork_tree_bench::<false>);
+    tests.insert("fork_serial_bench", proc::fork_serial_bench::<false>);
+    tests.insert("fork_exec_serial_bench", proc::fork_serial_bench::<true>);
+    tests.insert("fork_exec_tree_bench", proc::fork_tree_bench::<true>);
+    tests.insert("stop_orphan_pgrp", proc::stop_orphan_pgrp);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {
@@ -857,8 +918,12 @@ fn main() {
             let elapsed = time.elapsed();
             match res {
                 Ok(_) => {
-                    println!("acid: {}: passed: {} ns", arg, elapsed.as_secs() * 1000000000 + elapsed.subsec_nanos() as u64);
-                },
+                    println!(
+                        "acid: {}: passed: {} ns",
+                        arg,
+                        elapsed.as_secs() * 1000000000 + elapsed.subsec_nanos() as u64
+                    );
+                }
                 Err(err) => {
                     println!("acid: {}: failed: {}", arg, err);
                 }
@@ -869,7 +934,7 @@ fn main() {
         }
     }
 
-    if ! ran_test {
+    if !ran_test {
         for test in tests {
             println!("{}", test.0);
         }

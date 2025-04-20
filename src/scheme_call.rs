@@ -5,12 +5,14 @@ use syscall::{CallFlags, Result};
 
 use crate::daemon::Daemon;
 
-struct TestScheme {
-}
+struct TestScheme {}
 impl SchemeSync for TestScheme {
     fn open(&mut self, _path: &str, _flags: usize, _ctx: &CallerCtx) -> Result<OpenResult> {
         println!("CALLED SYS_OPEN");
-        Ok(OpenResult::ThisScheme { number: 0, flags: NewFdFlags::empty() })
+        Ok(OpenResult::ThisScheme {
+            number: 0,
+            flags: NewFdFlags::empty(),
+        })
     }
     fn call(&mut self, id: usize, payload: &mut [u8], metadata: &[u64]) -> Result<usize> {
         println!("CALLED SYS_CALL, ID {id} payload {payload:?} metadata {metadata:?}");
@@ -22,8 +24,7 @@ impl SchemeSync for TestScheme {
 pub fn scheme_call() -> anyhow::Result<()> {
     Daemon::new(move |ready| {
         let sock = Socket::create("test-scheme").unwrap();
-        let mut scheme = TestScheme {
-        };
+        let mut scheme = TestScheme {};
         ready.ready().unwrap();
 
         loop {
@@ -37,7 +38,8 @@ pub fn scheme_call() -> anyhow::Result<()> {
             let _ = sock.write_response(res, SignalBehavior::Restart).unwrap();
         }
         std::process::exit(0);
-    }).unwrap();
+    })
+    .unwrap();
 
     let fd = syscall::open("/scheme/test-scheme/file", 0).unwrap();
 
@@ -52,7 +54,8 @@ pub fn scheme_call() -> anyhow::Result<()> {
             data_buf.len(),
             metadata_buf.len(),
             metadata_buf.as_ptr() as usize,
-        ).unwrap()
+        )
+        .unwrap()
     };
     assert_eq!(code, 1337);
     assert_eq!(data_buf[0], 10);
