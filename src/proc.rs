@@ -210,7 +210,7 @@ pub fn setpgid() -> Result<()> {
         Case::ModifyParent,
         Case::NewPgidNotPid,
         Case::SetFromChild,
-        //Case::HasRunExec, FIXME
+        Case::HasRunExec,
     ];
     for case in cases {
         inner(case)?;
