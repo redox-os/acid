@@ -475,7 +475,7 @@ pub fn waitpid_setpgid_echild() -> Result<()> {
     }
     Ok(())
 }
-pub fn orphan_exit_sighup() -> Result<()> {
+pub fn orphan_exit_sighup<const SEPARATE_SESSION: bool>() -> Result<()> {
     println!("Testing SIGHUP for newly-orphaned process groups");
     // Start a new session with a few subprocesses, and check that all of them get a SIGHUP if the
     // process group becomes an orphan process group. An orphaned process group is defined by POSIX
@@ -505,7 +505,9 @@ pub fn orphan_exit_sighup() -> Result<()> {
     // the link to outside the process group, and if any of CHILD0..CHILDn are stopped, they will
     // be SIGCONT'd and SIGHUP'd.
 
-    if unistd::getppid().as_raw() != 1 || unistd::getpgid(None)?.as_raw() != 1 {
+    if SEPARATE_SESSION {
+        unistd::setsid()?;
+    } else if unistd::getppid().as_raw() != 1 || unistd::getpgid(None)?.as_raw() != 1 {
         eprintln!("warning: this test only works when ppid and pgid is init!");
         std::process::exit(0);
     }
