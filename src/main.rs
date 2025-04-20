@@ -912,6 +912,7 @@ fn main() {
     tests.insert("reparenting", proc::reparenting);
     tests.insert("waitpid_setpgid_echild", proc::waitpid_setpgid_echild);
     tests.insert("thread_reap", proc::thread_reap);
+    tests.insert("orphan_exit_sighup", proc::orphan_exit_sighup);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {

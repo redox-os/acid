@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use nix::errno::Errno;
-use nix::sys::signal::{self, Signal};
+use nix::sys::signal::{self, SigSet, SigmaskHow, Signal};
 use nix::sys::wait::{self, WaitPidFlag, WaitStatus};
 use nix::unistd::{self, ForkResult, Pid};
 
@@ -87,7 +87,7 @@ pub fn reparenting() -> Result<()> {
 
     let ForkResult::Parent { .. } = (unsafe { unistd::fork()? }) else {
         // first child waits forever (a long time)
-        unistd::setpgid(Pid::from_raw(0), Pid::from_raw(0)).unwrap();
+        unistd::setpgid(Pid::this(), Pid::this()).unwrap();
         thread::sleep(Duration::MAX);
         std::process::exit(42);
     };
@@ -279,7 +279,7 @@ pub fn stop_orphan_pgrp() -> Result<()> {
             if unistd::getppid() != Pid::from_raw(1) {
                 eprintln!("Have to skip {case:?} since parent is not init");
             }
-            unistd::setpgid(Pid::from_raw(0), Pid::from_raw(1))?;
+            unistd::setpgid(Pid::this(), Pid::from_raw(1))?;
         }
 
         match unistd::fork().unwrap() {
@@ -300,7 +300,7 @@ pub fn stop_orphan_pgrp() -> Result<()> {
                 match case {
                     Case::SameGrp => (),
                     Case::Nonorphan => {
-                        unistd::setpgid(Pid::from_raw(0), Pid::from_raw(0))?;
+                        unistd::setpgid(Pid::this(), Pid::this())?;
                     }
                     Case::Setsid => {
                         unistd::setsid()?;
@@ -312,7 +312,7 @@ pub fn stop_orphan_pgrp() -> Result<()> {
                     }
                 }
                 // Stop this process group using either SIGTTIN, SIGTTOU, or SIGTSTP
-                signal::killpg(Pid::from_raw(0), sig)?;
+                signal::killpg(Pid::this(), sig)?;
                 std::process::exit(42);
             }
         }
@@ -474,4 +474,82 @@ pub fn waitpid_setpgid_echild() -> Result<()> {
         }
     }
     Ok(())
+}
+pub fn orphan_exit_sighup() -> Result<()> {
+    println!("Testing SIGHUP for newly-orphaned process groups");
+    // Start a new session with a few subprocesses, and check that all of them get a SIGHUP if the
+    // process group becomes an orphan process group. An orphaned process group is defined by POSIX
+    // 2024 as
+    //
+    // > A process group in which the parent of every member is either itself a member of the group
+    // > or is not a member of the group’s session (p. 67).
+    //
+    // with the behavior
+    //
+    // > If the exit of the process causes a process group to become orphaned, and if any member of
+    // > the newly-orphaned process group is stopped, then a SIGHUP signal followed by a SIGCONT
+    // > signal shall be sent to each process in the newly-orphaned process group (p. 569).
+    //
+    // Formally, orphan iff
+    //
+    // ∀ pid ∈ pgid : pid.ppid ∈ pgid ∨ pid.ppid ∉ pgid.session
+    //
+    // and nonorphan iff
+    //
+    // ∃ pid ∈ ppid : pid.ppid ∉ pgid ∧ pid.ppid ∈ pgid.session
+    //
+    // So we want to construct a new group in the same session as before, making them group
+    // nonorphan. We then kill the group leader, making it orphan since the children's pgids are
+    // not the same as init's (1), and observe SIGHUP being sent to the reparented child processes.
+
+    if unistd::getppid().as_raw() != 1 || unistd::getpgid(None)?.as_raw() != 1 {
+        eprintln!("warning: this test only works when ppid and pgid is init!");
+        std::process::exit(0);
+    }
+
+    // Mask SIGHUP
+    let mut just_sighup = SigSet::empty();
+    just_sighup.add(Signal::SIGHUP);
+    signal::sigprocmask(SigmaskHow::SIG_BLOCK, Some(&just_sighup), None)?;
+
+    let [mut read_fd, mut write_fd] = crate::pipe();
+
+    const N: u8 = 4;
+
+    if let ForkResult::Parent { child } = unsafe { unistd::fork()? } {
+        drop(write_fd);
+        assert_eq!(
+            wait::waitpid(child, Some(WaitPidFlag::empty())),
+            Ok(WaitStatus::Exited(child, 0))
+        );
+        let mut buf = [0xFF_u8; N as usize];
+        read_fd.read_exact(&mut buf)?;
+        for i in 0..N {
+            assert_eq!(buf[usize::from(i)], i);
+        }
+        return Ok(());
+    }
+    drop(read_fd);
+
+    unistd::setpgid(Pid::this(), Pid::this())?;
+
+    for i in 0..N {
+        let ForkResult::Child = (unsafe { unistd::fork()? }) else {
+            continue;
+        };
+        // TODO: add to redox
+        // just_sighup.wait().expect("failed to wait for SIGHUP");
+
+        let mut sig = 0 as libc::c_int;
+        assert_eq!(
+            unsafe { libc::sigwait(&just_sighup as *const _ as *const libc::sigset_t, &mut sig) },
+            0
+        );
+        assert_eq!(sig, Signal::SIGHUP as libc::c_int);
+
+        write_fd.write(&[i]).expect("failed to write to pipe");
+        std::process::exit(0); // only init will notice
+    }
+    thread::sleep(Duration::from_millis(100));
+    std::process::exit(0);
 }
