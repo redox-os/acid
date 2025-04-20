@@ -910,6 +910,7 @@ fn main() {
     tests.insert("setpgid", proc::setpgid);
     tests.insert("setsid", proc::setsid);
     tests.insert("reparenting", proc::reparenting);
+    tests.insert("waitpid_setpgid_echild", proc::waitpid_setpgid_echild);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {

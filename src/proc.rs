@@ -324,3 +324,55 @@ pub fn stop_orphan_pgrp() -> Result<()> {
     }
     Ok(())
 }
+pub fn waitpid_setpgid_echild() -> Result<()> {
+    #[derive(Debug)]
+    enum Case {
+        Setpgid,
+        Setsid,
+    }
+
+    let parent = unistd::getpid();
+    unistd::setpgid(parent, parent)?;
+
+    for case in [Case::Setpgid, Case::Setsid] {
+        println!("Testing waitpid-setpgid == ECHILD, case {case:?}");
+        match unsafe { unistd::fork()? } {
+            ForkResult::Child => {
+                let child = unistd::getpid();
+                thread::sleep(Duration::from_millis(100));
+                match case {
+                    Case::Setsid => assert_eq!(unistd::setsid()?, child),
+                    Case::Setpgid => unistd::setpgid(child, child)?,
+                }
+                assert_eq!(unistd::getpgid(None)?, child);
+                thread::sleep(Duration::MAX);
+                std::process::exit(0);
+            }
+            ForkResult::Parent { child } => {
+                let before = Instant::now();
+
+                // group (-child) shall match child until setpgid, when there are no children left
+                // matching pgid
+                assert_eq!(
+                    wait::waitpid(
+                        Some(Pid::from_raw(-parent.as_raw())),
+                        Some(WaitPidFlag::empty())
+                    ),
+                    Err(Errno::ECHILD)
+                );
+
+                // Check that it actually blocked
+                let delta = before.elapsed();
+                assert!(delta >= Duration::from_millis(100));
+
+                signal::kill(child, Signal::SIGTERM)?;
+                // None (-1) shall match child
+                assert_eq!(
+                    wait::waitpid(None, Some(WaitPidFlag::empty())),
+                    Ok(WaitStatus::Signaled(child, Signal::SIGTERM, false))
+                );
+            }
+        }
+    }
+    Ok(())
+}
