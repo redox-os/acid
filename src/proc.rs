@@ -98,6 +98,50 @@ pub fn reparenting() -> Result<()> {
     Ok(())
 }
 
+// TODO: add to the nix and libc crates
+extern "C" {
+    fn getsid(pid: libc::pid_t) -> libc::pid_t;
+}
+
+pub fn setsid() -> Result<()> {
+    // Create two processes in the same group.
+    let orig_sid = Pid::from_raw(unsafe { getsid(0) });
+    assert_ne!(orig_sid.as_raw(), -1);
+
+    let parent = unistd::getpid();
+    assert_eq!(unistd::setpgid(parent, parent), Ok(()));
+    assert_eq!(unistd::getpgid(None)?, parent);
+    assert_eq!(unistd::getpgid(Some(parent)), Ok(parent));
+
+    let ForkResult::Parent { child } = (unsafe { unistd::fork()? }) else {
+        thread::sleep(Duration::from_millis(100));
+        let new_sid = unistd::setsid()?;
+        assert_eq!(new_sid, unistd::getpid());
+        assert_eq!(unistd::getpgid(None)?, new_sid);
+        thread::sleep(Duration::MAX);
+        std::process::exit(0);
+    };
+
+    // Process group leaders cannot become session leader unless the process group is only that
+    // single process.
+    assert_eq!(unistd::setsid(), Err(Errno::EPERM));
+    thread::sleep(Duration::from_millis(200));
+
+    // Still, already a process group leader
+    assert_eq!(unistd::setsid(), Err(Errno::EPERM));
+
+    assert_eq!(unsafe { getsid(parent.as_raw()) }, orig_sid.as_raw());
+    assert_eq!(unsafe { getsid(child.as_raw()) }, child.as_raw());
+
+    signal::kill(child, Signal::SIGTERM)?;
+
+    assert_eq!(
+        wait::waitpid(child, Some(WaitPidFlag::empty()))?,
+        WaitStatus::Signaled(child, Signal::SIGTERM, false)
+    );
+    Ok(())
+}
+
 pub fn setpgid() -> Result<()> {
     #[derive(Debug)]
     enum Case {
