@@ -922,6 +922,7 @@ fn main() {
         proc::wcontinued_sigcont_catching,
     );
     tests.insert("using_signal_hook", proc::using_signal_hook);
+    tests.insert("waitpid_esrch", proc::waitpid_esrch);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {

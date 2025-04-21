@@ -659,3 +659,41 @@ pub fn using_signal_hook() -> Result<()> {
     thread.join().unwrap();
     Ok(())
 }
+pub fn waitpid_esrch() -> Result<()> {
+    // Spawn a few children, then waitpid "any child" until ECHILD, followed by checks that further
+    // waitpids return ESRCH.
+    const N: usize = 4;
+
+    let mut children = Vec::new();
+    for _ in 0..N {
+        if let ForkResult::Parent { child } = unsafe { unistd::fork()? } {
+            // PARENT
+            children.push(child);
+            continue;
+        }
+        // CHILD: exit immediately
+        std::process::exit(0);
+    }
+    children.sort();
+
+    let mut awaited_children = Vec::new();
+
+    loop {
+        let res = wait::wait();
+        if let Err(Errno::ECHILD) = res {
+            break;
+        };
+        let Ok(WaitStatus::Exited(child, 0)) = res else {
+            panic!("unexpected status: {res:?}");
+        };
+        awaited_children.push(child);
+    }
+    awaited_children.sort();
+    assert_eq!(children, awaited_children);
+
+    for child in awaited_children {
+        assert_eq!(wait::waitpid(child, None), Err(Errno::ESRCH));
+    }
+
+    Ok(())
+}
