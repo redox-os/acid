@@ -1,12 +1,13 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, IntoRawFd};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use nix::errno::Errno;
-use nix::sys::signal::{self, SigSet, SigmaskHow, Signal};
+use nix::sys::signal::{self, SaFlags, SigHandler, SigSet, SigmaskHow, Signal};
 use nix::sys::wait::{self, WaitPidFlag, WaitStatus};
 use nix::unistd::{self, ForkResult, Pid};
 
@@ -532,6 +533,7 @@ pub fn orphan_exit_sighup<const SEPARATE_SESSION: bool>() -> Result<()> {
         let mut buf = [0xFF_u8; N as usize];
         read_fd.read_exact(&mut buf)?;
         println!("BUF: {buf:?}");
+        buf.sort();
         for i in 0..N {
             assert_eq!(buf[usize::from(i)], i);
         }
@@ -565,4 +567,75 @@ pub fn orphan_exit_sighup<const SEPARATE_SESSION: bool>() -> Result<()> {
     unistd::setpgid(Pid::this(), Pid::this())?;
     thread::sleep(Duration::from_millis(100));
     std::process::exit(0);
+}
+pub fn wcontinued_sigcont_catching() -> Result<()> {
+    let [mut read_fd, write_fd] = crate::pipe();
+
+    let signals = [
+        Signal::SIGSTOP,
+        Signal::SIGTSTP,
+        Signal::SIGTTIN,
+        Signal::SIGTTOU,
+    ];
+    match unsafe { unistd::fork()? } {
+        ForkResult::Child => {
+            static WRITE_FD: AtomicUsize = AtomicUsize::new(0);
+            WRITE_FD.store(write_fd.into_raw_fd() as usize, Ordering::SeqCst);
+
+            // FIXME: this also fails, but not on Linux
+            /*
+            extern "C" fn handler(sig: libc::c_int) {
+                let buf = [sig as u8];
+                let fd = WRITE_FD.load(Ordering::SeqCst);
+                if unsafe { libc::write(fd as libc::c_int, buf.as_ptr().cast(), buf.len()) } != 1 {
+                    core::intrinsics::abort();
+                }
+            }
+            unsafe {
+                let handler = SigHandler::Handler(handler);
+                let action = signal::SigAction::new(handler, SaFlags::empty(), SigSet::empty());
+                signal::sigaction(Signal::SIGCONT, &action)?;
+            }
+            */
+
+            drop(read_fd);
+            for signal in signals {
+                println!("Stopping due to {signal:?}");
+                signal::raise(signal).unwrap();
+                // allows signal handler to run
+                thread::sleep(Duration::from_millis(500));
+            }
+            std::process::exit(0);
+        }
+        ForkResult::Parent { child } => {
+            drop(write_fd);
+            for signal in signals {
+                println!("Signal {signal:?}");
+                assert_eq!(
+                    wait::waitpid(
+                        child,
+                        Some(WaitPidFlag::WUNTRACED | WaitPidFlag::WCONTINUED)
+                    )?,
+                    WaitStatus::Stopped(child, signal)
+                );
+                println!("--stopped");
+                signal::kill(child, Signal::SIGCONT)?;
+                assert_eq!(
+                    wait::waitpid(
+                        child,
+                        Some(WaitPidFlag::WUNTRACED | WaitPidFlag::WCONTINUED)
+                    )?,
+                    WaitStatus::Continued(child)
+                );
+                println!("--contd");
+                // FIXME: this also fails, but not on Linux
+                /*
+                let mut buf = [0xFF];
+                assert_eq!(read_fd.read(&mut buf)?, 1);
+                assert_eq!(buf[0], Signal::SIGCONT as u8);
+                */
+            }
+        }
+    }
+    Ok(())
 }
