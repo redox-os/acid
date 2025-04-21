@@ -931,6 +931,7 @@ fn main() {
     tests.insert("using_signal_hook", proc::using_signal_hook);
     tests.insert("waitpid_esrch", proc::waitpid_esrch);
     tests.insert("waitpid_status_discard", proc::waitpid_status_discard);
+    tests.insert("waitpid_transitive_queue", proc::waitpid_transitive_queue);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {

@@ -742,3 +742,55 @@ pub fn waitpid_status_discard() -> Result<()> {
 
     Ok(())
 }
+pub fn waitpid_transitive_queue() -> Result<()> {
+    // Spawn a lot of children
+    let mut children = Vec::new();
+
+    for _ in 0..100 {
+        if let ForkResult::Parent { child } = unsafe { unistd::fork()? } {
+            children.push(child);
+            continue;
+        }
+        // CHILDi
+        thread::sleep(Duration::MAX);
+        unreachable!();
+    }
+    // PARENT
+    // make CHILDi where i divisble by 10, process group leaders
+    for i in (0..100).filter(|i| *i % 10 == 0) {
+        unistd::setpgid(children[i], children[i])?;
+    }
+    // make other CHILDi's belong to group leader CHILD_floor((100-i)/10)*10
+    for i in (0..100).filter(|i| *i % 10 != 0) {
+        let j = (100 - i) / 10 * 10;
+        unistd::setpgid(children[i], children[j])?;
+    }
+    // exit all leaders and remove them from waitpid queue
+    for i in (0..100).filter(|i| *i % 10 == 0) {
+        signal::kill(children[i], Signal::SIGTERM)?;
+        assert_eq!(
+            wait::waitpid(
+                Pid::from_raw(-children[i].as_raw()),
+                Some(WaitPidFlag::empty())
+            ),
+            Ok(WaitStatus::Signaled(children[i], Signal::SIGTERM, false))
+        );
+    }
+    // kill all remaining children
+    for i in (0..100).filter(|i| *i % 10 != 0) {
+        signal::kill(children[i], Signal::SIGTERM)?;
+    }
+    thread::sleep(Duration::from_millis(1000));
+
+    // now, wait for process groups
+    let res = wait::waitpid(
+        Pid::from_raw(-children[30].as_raw()),
+        Some(WaitPidFlag::WNOHANG),
+    );
+    // haven't waited for any non-leader child proc in that group
+    assert_ne!(res, Err(Errno::ECHILD),);
+    // all of the children should be dead by now
+    assert_ne!(res, Ok(WaitStatus::StillAlive));
+
+    Ok(())
+}
