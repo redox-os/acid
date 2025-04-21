@@ -698,7 +698,7 @@ pub fn waitpid_esrch() -> Result<()> {
     assert_eq!(children, awaited_children);
 
     for child in awaited_children {
-        assert_eq!(wait::waitpid(child, None), Err(Errno::ESRCH));
+        assert_eq!(wait::waitpid(child, None), Err(Errno::ECHILD));
     }
 
     Ok(())
