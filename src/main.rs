@@ -22,13 +22,17 @@ use syscall::{Map, MapFlags, ADDRSPACE_OP_MMAP, ADDRSPACE_OP_MUNMAP, O_CLOEXEC};
 
 use anyhow::{bail, Result};
 
+#[cfg(target_os = "redox")]
 mod cross_scheme_link;
+#[cfg(target_os = "redox")]
+mod scheme_call;
+#[cfg(target_os = "redox")]
+mod scheme_data_leak;
+
 mod daemon;
 //mod eintr; // TODO
 mod proc;
 mod relibc_leak;
-mod scheme_call;
-mod scheme_data_leak;
 mod syscall_bench;
 
 #[cfg(target_arch = "x86_64")]
@@ -879,6 +883,7 @@ fn main() {
     tests.insert("tcp_fin", tcp_fin_test);
     tests.insert("thread", thread_test);
     tests.insert("tls", tls_test);
+    #[cfg(target_os = "redox")]
     tests.insert("cross_scheme_link", cross_scheme_link::cross_scheme_link);
     tests.insert("efault", efault_test);
     #[cfg(target_arch = "x86_64")]
@@ -886,6 +891,7 @@ fn main() {
     #[cfg(target_arch = "x86_64")]
     tests.insert("direction_flag_int", direction_flag_interrupt_test);
     tests.insert("pipe", pipe_test);
+    #[cfg(target_os = "redox")]
     tests.insert("scheme_data_leak", scheme_data_leak::scheme_data_leak_test);
     tests.insert("relibc_leak", relibc_leak::test);
     tests.insert("clone_grant_using_fmap", clone_grant_using_fmap_test);
@@ -901,6 +907,7 @@ fn main() {
     //tests.insert("eintr", eintr::eintr); // TODO
     tests.insert("syscall_bench", syscall_bench::bench);
     tests.insert("filetable_leak", filetable_leak);
+    #[cfg(target_os = "redox")]
     tests.insert("scheme_call", scheme_call::scheme_call);
     tests.insert("fork_tree_bench", proc::fork_tree_bench::<false>);
     tests.insert("fork_serial_bench", proc::fork_serial_bench::<false>);
