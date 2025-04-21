@@ -720,8 +720,14 @@ pub fn waitpid_status_discard() -> Result<()> {
         }
         ForkResult::Parent { child } => {
             signal::kill(child, Signal::SIGSTOP)?;
+
+            // TODO: repeatedly?
             signal::kill(child, Signal::SIGCONT)?;
             signal::kill(child, Signal::SIGTERM)?;
+
+            // Not guaranteed it has time to terminate otherwise.
+            thread::sleep(Duration::from_millis(100));
+
             let flags = WaitPidFlag::WUNTRACED | WaitPidFlag::WCONTINUED;
             assert_eq!(
                 wait::waitpid(child, Some(flags)),
