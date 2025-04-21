@@ -794,3 +794,41 @@ pub fn waitpid_transitive_queue() -> Result<()> {
 
     Ok(())
 }
+pub fn pgrp_lifetime() -> Result<()> {
+    // Check that an old process group is recognized as 'no longer existent' if all members exit,
+    // or switch to a different group.
+    let ForkResult::Parent { child: child1 } = (unsafe { unistd::fork()? }) else {
+        unistd::setpgid(Pid::this(), Pid::this())?;
+        thread::sleep(Duration::from_millis(200));
+        // leaving the group by exiting and being waited by parent
+        std::process::exit(0);
+    };
+    thread::sleep(Duration::from_millis(100));
+    let ForkResult::Parent { .. } = (unsafe { unistd::fork()? }) else {
+        unistd::setpgid(Pid::this(), child1)?;
+        thread::sleep(Duration::from_millis(100));
+        // leaving the group using setpgid
+        unistd::setpgid(Pid::this(), Pid::this())?;
+        std::process::exit(0);
+    };
+    let ForkResult::Parent { .. } = (unsafe { unistd::fork()? }) else {
+        unistd::setpgid(Pid::this(), child1)?;
+        thread::sleep(Duration::from_millis(100));
+        // leaving the group using setsid
+        unistd::setsid()?;
+        std::process::exit(0); // from leaving the group using setsid
+    };
+    thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        wait::waitpid(child1, Some(WaitPidFlag::empty())),
+        Ok(WaitStatus::Exited(child1, 0))
+    );
+
+    // At this point, the group should be empty, so we cannot enter pgrp child1 as our own pid
+    // differs from child1.
+    assert_eq!(unistd::setpgid(Pid::this(), child1), Err(Errno::EPERM));
+
+    // Reap other children.
+    while let Ok(_) = wait::wait() {}
+    Ok(())
+}
