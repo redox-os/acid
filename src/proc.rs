@@ -1,3 +1,9 @@
+//! This file tries to enforce behavior interpreted from the POSIX 2024 standard:
+//!
+//! "IEEE/Open Group Standard for Information Technology--Portable Operating System Interface
+//! (POSIX™) Base Specifications, Issue 8," in IEEE/Open Group Std 1003.1-2024 (Revision of IEEE
+//! Std 1003.1-2017) , vol., no., pp.1-4107, 14 June 2024, doi: 10.1109/IEEESTD.2024.10555529.
+
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::{AsRawFd, IntoRawFd};
@@ -693,6 +699,39 @@ pub fn waitpid_esrch() -> Result<()> {
 
     for child in awaited_children {
         assert_eq!(wait::waitpid(child, None), Err(Errno::ESRCH));
+    }
+
+    Ok(())
+}
+
+pub fn waitpid_status_discard() -> Result<()> {
+    // POSIX 2024 states (p. 564):
+    //
+    // > If new status information is generated, and the process already had status information, the
+    // > existing status information shall be discarded and replaced with the new status information.
+    //
+    // We can test this by creating a child process, stopping it+continuing it repeatedly, and
+    // ensuring only the latest status information is available at any given time.
+
+    match unsafe { unistd::fork()? } {
+        ForkResult::Child => {
+            thread::sleep(Duration::MAX);
+            unreachable!();
+        }
+        ForkResult::Parent { child } => {
+            signal::kill(child, Signal::SIGSTOP)?;
+            signal::kill(child, Signal::SIGCONT)?;
+            signal::kill(child, Signal::SIGTERM)?;
+            let flags = WaitPidFlag::WUNTRACED | WaitPidFlag::WCONTINUED;
+            assert_eq!(
+                wait::waitpid(child, Some(flags)),
+                Ok(WaitStatus::Signaled(child, Signal::SIGTERM, false))
+            );
+            assert_eq!(wait::waitpid(child, Some(flags)), Err(Errno::ECHILD));
+            assert_eq!(wait::wait(), Err(Errno::ECHILD));
+            assert_eq!(signal::kill(child, Signal::SIGALRM), Err(Errno::ESRCH));
+            assert_eq!(wait::waitpid(child, Some(flags)), Err(Errno::ECHILD));
+        }
     }
 
     Ok(())
