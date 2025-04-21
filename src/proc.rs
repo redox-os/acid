@@ -1,7 +1,8 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::{AsRawFd, IntoRawFd};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -637,5 +638,24 @@ pub fn wcontinued_sigcont_catching() -> Result<()> {
             }
         }
     }
+    Ok(())
+}
+pub fn using_signal_hook() -> Result<()> {
+    let flag = Arc::new(AtomicBool::new(false));
+    signal_hook::flag::register(signal_hook::consts::SIGALRM, Arc::clone(&flag))?;
+
+    struct ForceSendSync<T>(T);
+    unsafe impl<T> Send for ForceSendSync<T> {}
+    unsafe impl<T> Sync for ForceSendSync<T> {}
+
+    let main_thread = ForceSendSync(unsafe { libc::pthread_self() });
+    let thread = thread::spawn(move || unsafe {
+        let main_thread = main_thread;
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(libc::pthread_kill(main_thread.0, libc::SIGALRM), 0);
+    });
+    thread::sleep(Duration::from_millis(200));
+    assert!(flag.load(Ordering::SeqCst));
+    thread.join().unwrap();
     Ok(())
 }

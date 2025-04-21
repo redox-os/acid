@@ -921,6 +921,7 @@ fn main() {
         "wcontinued_sigcont_catching",
         proc::wcontinued_sigcont_catching,
     );
+    tests.insert("using_signal_hook", proc::using_signal_hook);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {
