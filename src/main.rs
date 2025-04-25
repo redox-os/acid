@@ -22,11 +22,12 @@ use syscall::{Map, MapFlags, ADDRSPACE_OP_MMAP, ADDRSPACE_OP_MUNMAP, O_CLOEXEC};
 
 use anyhow::{bail, Result};
 
-#[cfg(target_os = "redox")]
+// (rust-analyzer uses cfg(test) but doesn't need symbols, which cargo check would need)
+#[cfg(any(test, target_os = "redox"))]
 mod cross_scheme_link;
-#[cfg(target_os = "redox")]
+#[cfg(any(test, target_os = "redox"))]
 mod scheme_call;
-#[cfg(target_os = "redox")]
+#[cfg(any(test, target_os = "redox"))]
 mod scheme_data_leak;
 
 mod daemon;
@@ -883,16 +884,27 @@ fn main() {
     tests.insert("tcp_fin", tcp_fin_test);
     tests.insert("thread", thread_test);
     tests.insert("tls", tls_test);
-    #[cfg(target_os = "redox")]
-    tests.insert("cross_scheme_link", cross_scheme_link::cross_scheme_link);
+    #[cfg(any(test, target_os = "redox"))]
+    {
+        tests.insert("cross_scheme_link", cross_scheme_link::cross_scheme_link);
+    }
     tests.insert("efault", efault_test);
     #[cfg(target_arch = "x86_64")]
     tests.insert("direction_flag_sc", direction_flag_syscall_test);
     #[cfg(target_arch = "x86_64")]
     tests.insert("direction_flag_int", direction_flag_interrupt_test);
     tests.insert("pipe", pipe_test);
-    #[cfg(target_os = "redox")]
-    tests.insert("scheme_data_leak", scheme_data_leak::scheme_data_leak_test);
+    #[cfg(any(test, target_os = "redox"))]
+    {
+        tests.insert(
+            "scheme_data_leak_proc",
+            scheme_data_leak::scheme_data_leak_test_proc,
+        );
+        tests.insert(
+            "scheme_data_leak_thread",
+            scheme_data_leak::scheme_data_leak_test_thread,
+        );
+    }
     tests.insert("relibc_leak", relibc_leak::test);
     tests.insert("clone_grant_using_fmap", clone_grant_using_fmap_test);
     tests.insert(
