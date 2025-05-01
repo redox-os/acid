@@ -2,17 +2,7 @@ use std::convert::Infallible;
 
 use libc::c_int;
 use syscall::{
-    Result,
-    Error,
-    close,
-    EIO,
-    read,
-    write,
-    SchemeMut,
-    Packet,
-    O_CREAT,
-    O_RDWR,
-    O_CLOEXEC, EINTR,
+    close, read, write, Error, Packet, Result, SchemeMut, EINTR, EIO, O_CLOEXEC, O_CREAT, O_RDWR,
 };
 
 #[must_use = "Daemon::ready must be called"]
@@ -35,9 +25,7 @@ impl Daemon {
         if res == 0 {
             let _ = close(read_pipe);
 
-            f(Daemon {
-                write_pipe,
-            });
+            f(Daemon { write_pipe });
             // TODO: Replace Infallible with the never type once it is stabilized.
             unreachable!();
         } else {
@@ -76,7 +64,8 @@ pub fn scheme(name: &str, scheme_name: &str, mut scheme: impl SchemeMut) -> Resu
             std::process::exit(1)
         };
 
-        let socket = syscall::open(format!(":{}", scheme_name), O_CREAT | O_RDWR | O_CLOEXEC).unwrap_or_else(|error| error_handler(error));
+        let socket = syscall::open(format!(":{}", scheme_name), O_CREAT | O_RDWR | O_CLOEXEC)
+            .unwrap_or_else(|error| error_handler(error));
 
         daemon.ready().unwrap_or_else(|error| error_handler(error));
 
