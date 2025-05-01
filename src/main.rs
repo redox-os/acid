@@ -18,7 +18,6 @@ use std::time::{Duration, Instant};
 use std::{env, process};
 
 use libc::{O_RDWR, c_int};
-use syscall::{O_CLOEXEC, Map, MapFlags, ADDRSPACE_OP_MMAP, ADDRSPACE_OP_MUNMAP};
 use syscall::O_RDONLY;
 use syscall::PAGE_SIZE;
 use syscall::{Map, MapFlags, ADDRSPACE_OP_MMAP, ADDRSPACE_OP_MUNMAP, O_CLOEXEC};
