@@ -33,6 +33,7 @@ struct Ucred {
 ///
 pub mod dgram_tests {
     use super::{from_syscall_error, socket_kind};
+    use anyhow::Result;
     use libc::{bind, close};
     use std::{ffi::CString, io, mem, thread, time::Duration};
 
@@ -299,7 +300,7 @@ pub mod dgram_tests {
         Ok(())
     }
 
-    pub fn run_all() -> io::Result<()> {
+    pub fn run_all() -> Result<()> {
         println!("\n[DGRAM] Starting all dgram tests...");
         test_bind_and_fpath_and_connect()?;
         test_socketpair_io()?;
@@ -317,6 +318,7 @@ pub mod dgram_tests {
 ///
 pub mod stream_tests {
     use super::{from_syscall_error, socket_kind};
+    use anyhow::Result;
     use libc::{accept, bind, close, connect, sockaddr};
     use std::{ffi::CString, io, mem, thread};
     use syscall::{self, error::*};
@@ -785,7 +787,7 @@ pub mod stream_tests {
         Ok(())
     }
 
-    pub fn run_all() -> io::Result<()> {
+    pub fn run_all() -> Result<()> {
         println!("\n[STREAM] Starting all stream tests...");
         test_bind_listen_accept_connect()?;
         test_close_listener_with_active_and_pending_connections()?;
@@ -804,6 +806,7 @@ pub mod stream_tests {
 ///
 pub mod dgram_msghdr_tests {
     use super::{from_syscall_error, Ucred, SCM_CREDENTIALS, SCM_RIGHTS};
+    use anyhow::Result;
     use libc::{
         c_int, c_void, close, cmsghdr, iovec, msghdr, recvmsg, sendmsg, socketpair, AF_UNIX,
         CMSG_DATA, CMSG_FIRSTHDR, CMSG_LEN, CMSG_NXTHDR, CMSG_SPACE, MSG_CTRUNC, MSG_TRUNC,
@@ -1305,7 +1308,7 @@ pub mod dgram_msghdr_tests {
         Ok(())
     }
 
-    pub fn run_all() -> io::Result<()> {
+    pub fn run_all() -> Result<()> {
         println!("\n[DGRAM_MSGHDR] Starting all msghdr tests...");
         test_send_recv_fd()?;
         test_send_recv_credentials()?;
@@ -1324,6 +1327,7 @@ pub mod dgram_msghdr_tests {
 ///
 pub mod stream_msghdr_tests {
     use super::{from_syscall_error, Ucred, SCM_CREDENTIALS, SCM_RIGHTS};
+    use anyhow::Result;
     use libc::{
         c_int, c_void, close, cmsghdr, iovec, msghdr, recvmsg, sendmsg, socketpair, AF_UNIX,
         CMSG_DATA, CMSG_FIRSTHDR, CMSG_LEN, CMSG_SPACE, MSG_CTRUNC, SOCK_STREAM, SOL_SOCKET,
@@ -2145,7 +2149,7 @@ pub mod stream_msghdr_tests {
         Ok((total_received_data, received_fds))
     }
 
-    pub fn run_all() -> io::Result<()> {
+    pub fn run_all() -> Result<()> {
         println!("\n[STREAM_MSGHDR] Starting all msghdr tests...");
         test_send_recv_fd()?;
         test_send_recv_credentials()?;
