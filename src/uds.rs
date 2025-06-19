@@ -75,7 +75,7 @@ pub mod dgram_tests {
         Ok(socket_addr)
     }
 
-    fn test_bind_and_fpath_and_connect() -> io::Result<()> {
+    fn test_bind_and_connect_and_fpath() -> io::Result<()> {
         println!("[DGRAM] --- Testing Bind and Connect communication and fpath ---");
         let server_socket = create_socket()?;
 
@@ -302,7 +302,7 @@ pub mod dgram_tests {
 
     pub fn run_all() -> Result<()> {
         println!("\n[DGRAM] Starting all dgram tests...");
-        test_bind_and_fpath_and_connect()?;
+        test_bind_and_connect_and_fpath()?;
         test_socketpair_io()?;
         test_epipe()?;
         test_nonblocking_io()?;
@@ -354,7 +354,7 @@ pub mod stream_tests {
         Ok((socket_addr, len as libc::socklen_t))
     }
 
-    fn test_bind_listen_accept_connect() -> io::Result<()> {
+    fn test_bind_listen_accept_connect_and_fpath() -> io::Result<()> {
         println!("[STREAM] --- Testing bind, listen, accept, and connect ---");
 
         let listener_fd = create_socket()?;
@@ -683,7 +683,7 @@ pub mod stream_tests {
         Ok(())
     }
 
-    fn test_should_error() -> io::Result<()> {
+    fn test_wouldblock_dup_and_notconn_rw() -> io::Result<()> {
         println!("[STREAM] --- Testing Should Error ---");
 
         let server_socket = create_socket()?;
@@ -789,12 +789,12 @@ pub mod stream_tests {
 
     pub fn run_all() -> Result<()> {
         println!("\n[STREAM] Starting all stream tests...");
-        test_bind_listen_accept_connect()?;
+        test_bind_listen_accept_connect_and_fpath()?;
         test_close_listener_with_active_and_pending_connections()?;
         test_socketpair_io()?;
         test_reconnect_fails()?;
         test_zero_byte_write_and_eof()?;
-        test_should_error()?;
+        test_wouldblock_dup_and_notconn_rw()?;
         test_large_stream_transfer()?;
         println!("[STREAM] All stream tests finished successfully.");
         Ok(())
@@ -1567,53 +1567,6 @@ pub mod stream_msghdr_tests {
         Ok(())
     }
 
-    fn test_passcred_disabled() -> io::Result<()> {
-        println!("[STREAM_MSGHDR] --- [Edge Case] Testing Receiver with SO_PASSCRED Disabled ---");
-        let mut fds = [-1, -1];
-        if unsafe { socketpair(AF_UNIX, SOCK_STREAM, 0, fds.as_mut_ptr()) } != 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let (receiver_sock, sender_sock) = (fds[0], fds[1]);
-
-        let handle = thread::spawn(move || -> io::Result<()> {
-            let message = "Hello with credentials!";
-            let mut iov = iovec {
-                iov_base: message.as_ptr() as *mut c_void,
-                iov_len: message.len(),
-            };
-            let mut msg: msghdr = unsafe { mem::zeroed() };
-            msg.msg_iov = &mut iov;
-            msg.msg_iovlen = 1;
-            if unsafe { sendmsg(sender_sock, &msg, 0) } < 0 {
-                return Err(io::Error::last_os_error());
-            }
-            unsafe { close(sender_sock) };
-            Ok(())
-        });
-
-        let mut data_buf = [0u8; 64];
-        let mut iov = iovec {
-            iov_base: data_buf.as_mut_ptr() as *mut c_void,
-            iov_len: data_buf.len(),
-        };
-        let cmsg_buf_len = unsafe { CMSG_SPACE(mem::size_of::<Ucred>() as u32) as usize };
-        let mut cmsg_buf = vec![0u8; cmsg_buf_len];
-        let mut msg: msghdr = unsafe { mem::zeroed() };
-        msg.msg_iov = &mut iov;
-        msg.msg_iovlen = 1;
-        msg.msg_control = cmsg_buf.as_mut_ptr() as *mut c_void;
-        msg.msg_controllen = cmsg_buf.len();
-
-        unsafe { recvmsg(receiver_sock, &mut msg, 0) };
-
-        let cmsg: *const cmsghdr = unsafe { CMSG_FIRSTHDR(&msg) };
-        assert!(cmsg.is_null(), "No control message should be received");
-        handle.join().unwrap()?;
-        unsafe { close(receiver_sock) };
-        println!("[OK] No SCM_CREDENTIALS message was received, as expected.");
-        Ok(())
-    }
-
     fn test_control_buffer_truncation() -> io::Result<()> {
         println!(
             "[STREAM_MSGHDR] --- [Edge Case] Testing Control Buffer Truncation (MSG_CTRUNC) ---"
@@ -1746,6 +1699,53 @@ pub mod stream_msghdr_tests {
         handle.join().unwrap()?;
         unsafe { close(receiver_sock) };
         println!("[OK] Received 2 FDs: {:?}", received_fds);
+        Ok(())
+    }
+
+    fn test_passcred_disabled() -> io::Result<()> {
+        println!("[STREAM_MSGHDR] --- [Edge Case] Testing Receiver with SO_PASSCRED Disabled ---");
+        let mut fds = [-1, -1];
+        if unsafe { socketpair(AF_UNIX, SOCK_STREAM, 0, fds.as_mut_ptr()) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let (receiver_sock, sender_sock) = (fds[0], fds[1]);
+
+        let handle = thread::spawn(move || -> io::Result<()> {
+            let message = "Hello with credentials!";
+            let mut iov = iovec {
+                iov_base: message.as_ptr() as *mut c_void,
+                iov_len: message.len(),
+            };
+            let mut msg: msghdr = unsafe { mem::zeroed() };
+            msg.msg_iov = &mut iov;
+            msg.msg_iovlen = 1;
+            if unsafe { sendmsg(sender_sock, &msg, 0) } < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            unsafe { close(sender_sock) };
+            Ok(())
+        });
+
+        let mut data_buf = [0u8; 64];
+        let mut iov = iovec {
+            iov_base: data_buf.as_mut_ptr() as *mut c_void,
+            iov_len: data_buf.len(),
+        };
+        let cmsg_buf_len = unsafe { CMSG_SPACE(mem::size_of::<Ucred>() as u32) as usize };
+        let mut cmsg_buf = vec![0u8; cmsg_buf_len];
+        let mut msg: msghdr = unsafe { mem::zeroed() };
+        msg.msg_iov = &mut iov;
+        msg.msg_iovlen = 1;
+        msg.msg_control = cmsg_buf.as_mut_ptr() as *mut c_void;
+        msg.msg_controllen = cmsg_buf.len();
+
+        unsafe { recvmsg(receiver_sock, &mut msg, 0) };
+
+        let cmsg: *const cmsghdr = unsafe { CMSG_FIRSTHDR(&msg) };
+        assert!(cmsg.is_null(), "No control message should be received");
+        handle.join().unwrap()?;
+        unsafe { close(receiver_sock) };
+        println!("[OK] No SCM_CREDENTIALS message was received, as expected.");
         Ok(())
     }
 
@@ -2154,9 +2154,9 @@ pub mod stream_msghdr_tests {
         test_send_recv_fd()?;
         test_send_recv_credentials()?;
         test_write_and_recvmsg_credentials()?;
-        test_passcred_disabled()?;
         test_control_buffer_truncation()?;
         test_send_multiple_fds()?;
+        test_passcred_disabled()?;
         test_eof_handling_with_msghdr()?;
         test_repeated_partial_reads_with_ancillary_data()?;
         test_receive_concatenated_stream_with_ancillary_data()?;
