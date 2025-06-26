@@ -56,6 +56,10 @@ The following tests are allowed:
 - `acid fork_serial_bench` - TODO
 - `acid fork_exec_tree_bench` - TODO
 - `acid fork_exec_serial_bench` - TODO
+- `acid uds_dgram` - Test the Unix Domain Socket datagram protocol.
+- `acid uds_stream` - Test the Unix Domain Socket stream protocol.
+- `acid uds_dgram_msghdr` - Test the sendmsg/recvmsg functionality over Unix Domain Sockets datagram protocol.
+- `acid uds_stream_msghdr` - Test the sendmsg/recvmsg functionality over Unix Domain Sockets stream protocol.
 - `acid switch` - Test to measure the context switch time in nanoseconds (ns).
 
 ```
