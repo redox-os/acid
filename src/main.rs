@@ -35,6 +35,7 @@ mod daemon;
 mod proc;
 mod relibc_leak;
 mod syscall_bench;
+mod uds;
 
 #[cfg(target_arch = "x86_64")]
 fn avx2_test() -> Result<()> {
@@ -946,6 +947,10 @@ fn main() {
     tests.insert("waitpid_transitive_queue", proc::waitpid_transitive_queue);
     tests.insert("pgrp_lifetime", proc::pgrp_lifetime);
     tests.insert("waitpid_eintr", proc::waitpid_eintr);
+    tests.insert("uds_dgram", uds::dgram_tests::run_all);
+    tests.insert("uds_stream", uds::stream_tests::run_all);
+    tests.insert("uds_dgram_msghdr", uds::dgram_msghdr_tests::run_all);
+    tests.insert("uds_stream_msghdr", uds::stream_msghdr_tests::run_all);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {
