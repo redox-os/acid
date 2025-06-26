@@ -946,6 +946,7 @@ fn main() {
     tests.insert("waitpid_status_discard", proc::waitpid_status_discard);
     tests.insert("waitpid_transitive_queue", proc::waitpid_transitive_queue);
     tests.insert("pgrp_lifetime", proc::pgrp_lifetime);
+    tests.insert("waitpid_eintr", proc::waitpid_eintr);
     tests.insert("uds_dgram", uds::dgram_tests::run_all);
     tests.insert("uds_stream", uds::stream_tests::run_all);
     tests.insert("uds_dgram_msghdr", uds::dgram_msghdr_tests::run_all);

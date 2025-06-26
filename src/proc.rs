@@ -832,3 +832,43 @@ pub fn pgrp_lifetime() -> Result<()> {
     while let Ok(_) = wait::wait() {}
     Ok(())
 }
+pub fn waitpid_eintr() -> Result<()> {
+    let [mut r1, mut w1] = crate::pipe();
+    let [mut r2, mut w2] = crate::pipe();
+
+    extern "C" fn h(_: libc::c_int) {}
+    unsafe {
+        signal::sigaction(
+            Signal::SIGUSR1,
+            &signal::SigAction::new(SigHandler::Handler(h), SaFlags::empty(), SigSet::all()),
+        )?;
+    }
+
+    let parent = unistd::getpid();
+
+    match unsafe { unistd::fork()? } {
+        ForkResult::Child => {
+            thread::sleep(Duration::from_millis(500));
+            w1.write_all(&[13])?;
+            signal::kill(parent, Signal::SIGUSR1)?;
+
+            let mut buf = [0];
+            r2.read_exact(&mut buf)?;
+            assert_eq!(buf, [37]);
+
+            std::process::exit(0);
+        }
+        ForkResult::Parent { child } => {
+            // Waitpid should first return EINTR, and can only happen after the actual signal
+            // (hence the pipe).
+            let mut buf = [0_u8];
+            assert_eq!(wait::waitpid(child, None), Err(Errno::EINTR));
+            r1.read_exact(&mut buf)?;
+            assert_eq!(buf, [13]);
+
+            w2.write_all(&[37])?;
+            assert_eq!(wait::waitpid(child, None), Ok(WaitStatus::Exited(child, 0)));
+            Ok(())
+        }
+    }
+}
