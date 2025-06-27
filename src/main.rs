@@ -1,7 +1,6 @@
 //!Acid testing program
 #![feature(array_chunks, core_intrinsics, let_chains, thread_local)]
 
-use std::ffi::CString;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
@@ -17,10 +16,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 use std::{env, process};
 
-use libc::{O_RDWR, c_int};
-use syscall::O_RDONLY;
+use libc::c_int;
 use syscall::PAGE_SIZE;
-use syscall::{Map, MapFlags, ADDRSPACE_OP_MMAP, ADDRSPACE_OP_MUNMAP, O_CLOEXEC};
+use syscall::{Map, MapFlags, ADDRSPACE_OP_MMAP, ADDRSPACE_OP_MUNMAP, O_CLOEXEC, O_CREAT, O_RDONLY, O_RDWR, O_DIRECTORY};
 
 use anyhow::{bail, Result};
 
@@ -876,7 +874,7 @@ pub fn filetable_leak() -> Result<()> {
 }
 
 fn openat_test() -> Result<()> {
-    fn create_file_test(raw_fd: libc::c_int, folder_path: &str, file_path: &str, content: &[u8]) -> Result<()>  {
+    fn create_file_test(raw_fd: c_int, folder_path: &str, file_path: &str, content: &[u8]) -> Result<()>  {
         let full_path = {   
             let full_path = format!("{}/{}", folder_path, file_path);
             let mut file: File = File::create(&full_path)?;
@@ -884,35 +882,33 @@ fn openat_test() -> Result<()> {
             file.flush()?;
             full_path
         };
-
-        let file_fd = syscall::openat(raw_fd as _, file_path, O_RDONLY | O_CLOEXEC)?;
+        let file_fd = syscall::openat(raw_fd as _, file_path, O_RDWR)?;
         let mut file: File = unsafe { File::from_raw_fd(file_fd as RawFd) };
-        let mut buffer = Vec::new();
+        let mut buffer: [u8; 24] = [0;24];
         let read = file.read(&mut buffer)?;
-        let _ = syscall::close(file_fd);
-
         assert_eq!(read, content.len());
         assert_eq!(&buffer, content);
+        let _ = syscall::close(file_fd);
         std::fs::remove_file(&full_path)?;
 
         Ok(())
     }
 
-    let path = "/openat_test";
-    // TODO: use mkdir
-    // let raw_fd = unsafe { libc::mkdir(CString::new(path).unwrap().as_ptr(), O_RDWR as _) };
-    let raw_fd = syscall::open(path, (O_RDWR | O_CLOEXEC as c_int) as _).unwrap() as _;
-
-    create_file_test(raw_fd, &path, "tmp1", b"Temporary File Content 1").unwrap();
-    create_file_test(raw_fd, &path, "tmp2", b"Temporary File Content 2").unwrap();
-    create_file_test(raw_fd, &path, "tmp3", b"Temporary File Content 3").unwrap();
+    let path = "/scheme/file/openat_test";
+    let raw_fd = syscall::open(&path, O_CREAT | O_DIRECTORY)? as _;
+    if raw_fd < 0 {
+        bail!("Failed to open directory");
+    }
+    create_file_test(raw_fd, &path, "tmp1", b"Temporary File Content 1")?;
+    create_file_test(raw_fd, &path, "tmp2", b"Temporary File Content 2")?;
+    create_file_test(raw_fd, &path, "tmp3", b"Temporary File Content 3")?;
 
     // Error case - invalid directory fd
     let invalid_fd = create_file_test(999999, "", "", b"");
     assert!(invalid_fd.is_err());
 
     // Error case - non-existent file
-    let non_existent = syscall::openat(raw_fd as _, "non_existent", O_RDONLY | O_CLOEXEC);
+    let non_existent = syscall::openat(raw_fd as _, "non_existent", O_RDWR);
     assert!(non_existent.is_err());
 
     // Cleanup
@@ -961,6 +957,7 @@ fn main() {
         "clone_grant_using_fmap_lazy",
         clone_grant_using_fmap_lazy_test,
     );
+    tests.insert("openat", openat_test);
     tests.insert("anonymous_map_shared", anonymous_map_shared);
     //tests.insert("tlb", tlb_test); // TODO
     tests.insert("file_mmap", file_mmap_test);
