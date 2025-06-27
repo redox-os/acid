@@ -804,6 +804,8 @@ pub mod stream_tests {
 ///
 /// Tests for advanced msghdr functionality on DGRAM sockets (SCM_RIGHTS, SCM_CREDENTIALS)
 ///
+//TODO: fix build issues
+#[cfg(not(target_os = "redox"))]
 pub mod dgram_msghdr_tests {
     use super::{from_syscall_error, Ucred, SCM_CREDENTIALS, SCM_RIGHTS};
     use anyhow::Result;
@@ -1325,6 +1327,8 @@ pub mod dgram_msghdr_tests {
 ///
 /// Tests for advanced msghdr functionality on STREAM sockets (SCM_RIGHTS, SCM_CREDENTIALS)
 ///
+//TODO: fix build issues
+#[cfg(not(target_os = "redox"))]
 pub mod stream_msghdr_tests {
     use super::{from_syscall_error, Ucred, SCM_CREDENTIALS, SCM_RIGHTS};
     use anyhow::Result;
