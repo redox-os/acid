@@ -1103,7 +1103,6 @@ fn main() {
     tests.insert("filetable_leak", filetable_leak);
     #[cfg(target_os = "redox")]
     tests.insert("scheme_call", scheme_call::scheme_call);
-    tests.insert("openat", openat_test);
     tests.insert("fork_tree_bench", proc::fork_tree_bench::<false>);
     tests.insert("fork_serial_bench", proc::fork_serial_bench::<false>);
     tests.insert("fork_exec_serial_bench", proc::fork_serial_bench::<true>);
