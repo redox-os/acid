@@ -16,9 +16,12 @@ use std::thread;
 use std::time::{Duration, Instant};
 use std::{env, process};
 
-use syscall::O_RDONLY;
+use libc::c_int;
 use syscall::PAGE_SIZE;
-use syscall::{Map, MapFlags, ADDRSPACE_OP_MMAP, ADDRSPACE_OP_MUNMAP, O_CLOEXEC};
+use syscall::{
+    Map, MapFlags, ADDRSPACE_OP_MMAP, ADDRSPACE_OP_MUNMAP, O_CLOEXEC, O_CREAT, O_DIRECTORY,
+    O_RDONLY, O_RDWR,
+};
 
 use anyhow::{bail, Result};
 
@@ -873,6 +876,183 @@ pub fn filetable_leak() -> Result<()> {
 
     Ok(())
 }
+
+fn openat_test() -> Result<()> {
+    fn test_access_modes(raw_fd: c_int, folder_path: &str) -> Result<()> {
+        // Test O_RDONLY - read-only access
+        let test_file = format!("{}/readonly_test", folder_path);
+        std::fs::write(&test_file, b"readonly content")?;
+
+        let file_fd = syscall::openat(raw_fd as _, "readonly_test", O_RDONLY)?;
+        let mut file: File = unsafe { File::from_raw_fd(file_fd as RawFd) };
+        let mut buffer = [0u8; 16];
+        let read = file.read(&mut buffer)?;
+        assert_eq!(read, 16);
+        assert_eq!(&buffer[..16], b"readonly content");
+
+        // Try to write to read-only file
+        let write_result = file.write(b"test");
+        assert!(write_result.is_err());
+
+        let _ = syscall::close(file_fd);
+        std::fs::remove_file(&test_file)?;
+
+        // Test O_WRONLY - write-only access
+        let test_file = format!("{}/writeonly_test", folder_path);
+        std::fs::write(&test_file, b"original content")?;
+
+        let file_fd = syscall::openat(raw_fd as _, "writeonly_test", syscall::O_WRONLY)?;
+        let mut file: File = unsafe { File::from_raw_fd(file_fd as RawFd) };
+
+        // Try to read from write-only file
+        let mut buffer = [0u8; 20];
+        let read_result = file.read(&mut buffer);
+        assert!(read_result.is_err());
+
+        let write_result = file.write(b"new content");
+        assert!(write_result.is_ok());
+
+        let _ = syscall::close(file_fd);
+        std::fs::remove_file(&test_file)?;
+
+        Ok(())
+    }
+
+    fn test_creation_flags(raw_fd: c_int, folder_path: &str) -> Result<()> {
+        // Test O_CREAT - create new file
+        let file_fd = syscall::openat(raw_fd as _, "new_file", O_CREAT | O_RDWR)?;
+        let mut file: File = unsafe { File::from_raw_fd(file_fd as RawFd) };
+        file.write(b"new file content")?;
+        let _ = syscall::close(file_fd);
+
+        // Verify file was created
+        let content = std::fs::read(format!("{}/new_file", folder_path))?;
+        assert_eq!(content, b"new file content");
+
+        // Test O_EXCL - exclusive creation
+        let excl_result =
+            syscall::openat(raw_fd as _, "new_file", O_CREAT | syscall::O_EXCL | O_RDWR);
+        assert!(excl_result.is_err());
+
+        // Test O_TRUNC - truncate existing file
+        let file_fd = syscall::openat(raw_fd as _, "new_file", syscall::O_TRUNC | O_RDWR)?;
+        let mut file: File = unsafe { File::from_raw_fd(file_fd as RawFd) };
+        file.write(b"truncated content")?;
+        let _ = syscall::close(file_fd);
+
+        // Verify file was truncated
+        let content = std::fs::read(format!("{}/new_file", folder_path))?;
+        assert_eq!(content, b"truncated content");
+
+        // Test O_APPEND - append mode
+        let file_fd = syscall::openat(raw_fd as _, "new_file", syscall::O_APPEND | O_RDWR)?;
+        let mut file: File = unsafe { File::from_raw_fd(file_fd as RawFd) };
+        file.write(b" appended")?;
+        let _ = syscall::close(file_fd);
+
+        // Verify content was appended
+        let content = std::fs::read(format!("{}/new_file", folder_path))?;
+        assert_eq!(content, b"truncated content appended");
+
+        std::fs::remove_file(format!("{}/new_file", folder_path))?;
+
+        Ok(())
+    }
+
+    fn test_error_conditions(raw_fd: c_int, folder_path: &str) -> Result<()> {
+        // Test ENOTDIR - try to openat with a file descriptor that's not a directory
+        let test_file = format!("{}/notdir_test", folder_path);
+        std::fs::write(&test_file, b"test content")?;
+
+        let file_fd = syscall::open(&test_file, O_RDONLY)?;
+        let notdir_result = syscall::openat(file_fd, "some_file", O_RDONLY);
+        assert!(notdir_result.is_err());
+
+        let _ = syscall::close(file_fd);
+        std::fs::remove_file(&test_file)?;
+
+        // Test EISDIR - try to open a directory as a regular file
+        let subdir = format!("{}/subdir", folder_path);
+        std::fs::create_dir(&subdir)?;
+
+        let dir_fd = syscall::open(&subdir, O_RDONLY)?;
+        let isdir_result = syscall::openat(dir_fd, ".", O_RDWR);
+        assert!(isdir_result.is_err());
+
+        let _ = syscall::close(dir_fd);
+        std::fs::remove_dir(&subdir)?;
+
+        // Test ENAMETOOLONG - very long pathname
+        let long_name = "a".repeat(1000);
+        let toolong_result = syscall::openat(raw_fd as _, &long_name, O_RDONLY);
+        assert!(toolong_result.is_err());
+
+        Ok(())
+    }
+
+    fn create_file_test(
+        raw_fd: c_int,
+        folder_path: &str,
+        file_path: &str,
+        content: &[u8],
+    ) -> Result<()> {
+        let full_path = {
+            // Write content to a temporary file
+            let full_path = format!("{}/{}", folder_path, file_path);
+            std::fs::write(&full_path, content)?;
+            full_path
+        };
+
+        let file_fd = syscall::openat(raw_fd as _, file_path, O_RDWR)?;
+        let mut file: File = unsafe { File::from_raw_fd(file_fd as RawFd) };
+        let mut buffer: [u8; 24] = [0; 24];
+        // Read the content back
+        let read = file.read(&mut buffer)?;
+        assert_eq!(read, content.len());
+        assert_eq!(&buffer[..content.len()], content);
+
+        // Clean up
+        let _ = syscall::close(file_fd);
+        std::fs::remove_file(&full_path)?;
+
+        Ok(())
+    }
+
+    let path = "/scheme/file/openat_test";
+    // Create the directory if it doesn't exist
+    let raw_fd = syscall::open(&path, O_CREAT | O_DIRECTORY)? as _;
+    if raw_fd < 0 {
+        bail!("Failed to open directory");
+    }
+
+    test_access_modes(raw_fd, &path)?;
+    test_creation_flags(raw_fd, &path)?;
+    test_error_conditions(raw_fd, &path)?;
+
+    create_file_test(raw_fd, &path, "tmp1", b"Temporary File Content 1")?;
+    create_file_test(raw_fd, &path, "tmp2", b"Temporary File Content 2")?;
+    create_file_test(raw_fd, &path, "tmp3", b"Temporary File Content 3")?;
+
+    // Error case - invalid directory fd
+    let error = create_file_test(999999, &path, "tmp", b"")
+        .expect_err("Expected an error for invalid directory fd");
+    assert!(
+        matches!(error.downcast_ref::<syscall::Error>(), Some(e) if e.errno == syscall::EBADF),
+        "Expected EBADF, got: {error}"
+    );
+
+    // Error case - non-existent file
+    let non_existent = syscall::openat(raw_fd as _, "non_existent", O_RDWR)
+        .expect_err("Expected an error for non-existent file");
+    assert_eq!(non_existent.errno, syscall::ENOENT, "Expected ENOENT, got: {non_existent}");
+
+    // Cleanup
+    let _ = syscall::close(raw_fd as _);
+    std::fs::remove_dir_all(&path)?;
+
+    Ok(())
+}
+
 fn main() {
     let mut tests: HashMap<&'static str, fn() -> Result<()>> = HashMap::new();
     #[cfg(target_arch = "x86_64")]
@@ -912,6 +1092,7 @@ fn main() {
         "clone_grant_using_fmap_lazy",
         clone_grant_using_fmap_lazy_test,
     );
+    tests.insert("openat", openat_test);
     tests.insert("anonymous_map_shared", anonymous_map_shared);
     //tests.insert("tlb", tlb_test); // TODO
     tests.insert("file_mmap", file_mmap_test);
