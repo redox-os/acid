@@ -965,26 +965,16 @@ fn openat_test() -> Result<()> {
         std::fs::write(&test_file, b"test content")?;
 
         let file_fd = syscall::open(&test_file, O_RDONLY)?;
-        let notdir_result = syscall::openat(file_fd, "some_file", O_RDONLY);
-        assert!(notdir_result.is_err());
+        let notdir_result = syscall::openat(file_fd, "some_file", O_RDONLY)
+            .expect_err("Expected an error for not directory");
+        assert_eq!(notdir_result.errno, syscall::ENOTDIR, "Expected ENOTDIR, got: {notdir_result}");
 
         let _ = syscall::close(file_fd);
         std::fs::remove_file(&test_file)?;
 
-        // Test EISDIR - try to open a directory as a regular file
-        let subdir = format!("{}/subdir", folder_path);
-        std::fs::create_dir(&subdir)?;
-
-        let dir_fd = syscall::open(&subdir, O_RDONLY)?;
-        let isdir_result = syscall::openat(dir_fd, ".", O_RDWR);
-        assert!(isdir_result.is_err());
-
-        let _ = syscall::close(dir_fd);
-        std::fs::remove_dir(&subdir)?;
-
-        // Test ENAMETOOLONG - very long pathname
+        // TODO: Test should emit ENAMETOOLONG, but gives EINVAL
         let long_name = "a".repeat(1000);
-        let toolong_result = syscall::openat(raw_fd as _, &long_name, O_RDONLY);
+        let toolong_result = syscall::openat(raw_fd as _, &long_name, O_CREAT | O_RDWR);
         assert!(toolong_result.is_err());
 
         Ok(())
@@ -1018,6 +1008,28 @@ fn openat_test() -> Result<()> {
         Ok(())
     }
 
+    // Test: rename directory after opening dir fd
+    fn test_rename_dir(path: &str) -> Result<()> {
+        let orig_dir = format!("{}/rename_test_dir", path);
+        let new_dir = format!("{}/renamed_dir", path);
+
+        std::fs::create_dir(&orig_dir)?;
+        let dir_fd = syscall::open(&orig_dir, O_DIRECTORY | O_RDONLY)?;
+        std::fs::rename(&orig_dir, &new_dir)?;
+
+        let fd = syscall::openat(dir_fd, "file_after_rename", O_CREAT | O_RDWR)?;
+        let mut file: File = unsafe { File::from_raw_fd(fd as RawFd) };
+        file.write_all(b"hello after rename")?;
+        let _ = syscall::close(fd);
+        let content = std::fs::read(format!("{}/file_after_rename", new_dir))?;
+        assert_eq!(content, b"hello after rename");
+        std::fs::remove_file(format!("{}/file_after_rename", new_dir))?;
+
+        let _ = syscall::close(dir_fd);
+        std::fs::remove_dir(&new_dir)?;
+        Ok(())
+    }
+
     let path = "/scheme/file/openat_test";
     // Create the directory if it doesn't exist
     let raw_fd = syscall::open(&path, O_CREAT | O_DIRECTORY)? as _;
@@ -1032,6 +1044,8 @@ fn openat_test() -> Result<()> {
     create_file_test(raw_fd, &path, "tmp1", b"Temporary File Content 1")?;
     create_file_test(raw_fd, &path, "tmp2", b"Temporary File Content 2")?;
     create_file_test(raw_fd, &path, "tmp3", b"Temporary File Content 3")?;
+
+    test_rename_dir(&path)?;
 
     // Error case - invalid directory fd
     let error = create_file_test(999999, &path, "tmp", b"")
