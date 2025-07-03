@@ -164,6 +164,7 @@ pub mod dgram_tests {
 
         thread.join().unwrap()?;
         unsafe { close(server_socket) };
+        syscall::unlink(SOCKET_PATH).map_err(from_syscall_error)?;
         Ok(())
     }
 
@@ -462,6 +463,7 @@ pub mod stream_tests {
         client_thread.join().unwrap()?;
 
         unsafe { close(listener_fd) };
+        syscall::unlink(SOCKET_PATH).map_err(from_syscall_error)?;
         println!("[STREAM OK] Bind/listen/accept/connect test passed.");
         Ok(())
     }
@@ -525,6 +527,7 @@ pub mod stream_tests {
 
         client_thread.join().unwrap()?;
         unsafe { close(client_fd) };
+        syscall::unlink(SOCKET_PATH).map_err(from_syscall_error)?;
 
         println!("[STREAM OK] Closing listener with active/pending connections test passed.");
         Ok(())
@@ -634,6 +637,7 @@ pub mod stream_tests {
 
         client_thread.join().unwrap()?;
         unsafe { close(client_fd) };
+        syscall::unlink(SOCKET_PATH).map_err(from_syscall_error)?;
         Ok(())
     }
 
