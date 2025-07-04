@@ -35,6 +35,7 @@ pub mod dgram_tests {
     use super::{from_syscall_error, socket_kind};
     use anyhow::Result;
     use libc::{bind, close};
+    use std::fs::remove_file;
     use std::{ffi::CString, io, mem, thread, time::Duration};
 
     const SOCKET_PATH: &str = "test_dgram.sock";
@@ -164,7 +165,7 @@ pub mod dgram_tests {
 
         thread.join().unwrap()?;
         unsafe { close(server_socket) };
-        syscall::unlink(SOCKET_PATH).map_err(from_syscall_error)?;
+        remove_file(SOCKET_PATH)?;
         Ok(())
     }
 
@@ -321,6 +322,7 @@ pub mod stream_tests {
     use super::{from_syscall_error, socket_kind};
     use anyhow::Result;
     use libc::{accept, bind, close, connect, sockaddr};
+    use std::fs::remove_file;
     use std::{ffi::CString, io, mem, thread};
     use syscall::{self, error::*};
 
@@ -463,7 +465,7 @@ pub mod stream_tests {
         client_thread.join().unwrap()?;
 
         unsafe { close(listener_fd) };
-        syscall::unlink(SOCKET_PATH).map_err(from_syscall_error)?;
+        remove_file(SOCKET_PATH)?;
         println!("[STREAM OK] Bind/listen/accept/connect test passed.");
         Ok(())
     }
@@ -527,7 +529,7 @@ pub mod stream_tests {
 
         client_thread.join().unwrap()?;
         unsafe { close(client_fd) };
-        syscall::unlink(SOCKET_PATH).map_err(from_syscall_error)?;
+        remove_file(SOCKET_PATH)?;
 
         println!("[STREAM OK] Closing listener with active/pending connections test passed.");
         Ok(())
@@ -637,7 +639,7 @@ pub mod stream_tests {
 
         client_thread.join().unwrap()?;
         unsafe { close(client_fd) };
-        syscall::unlink(SOCKET_PATH).map_err(from_syscall_error)?;
+        remove_file(SOCKET_PATH)?;
         Ok(())
     }
 
