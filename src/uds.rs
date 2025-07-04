@@ -495,6 +495,7 @@ pub mod stream_tests {
                 listener_fd
             );
             unsafe { close(listener_fd) };
+            remove_file(SOCKET_PATH)?;
             Ok(())
         });
 
@@ -529,7 +530,6 @@ pub mod stream_tests {
 
         client_thread.join().unwrap()?;
         unsafe { close(client_fd) };
-        remove_file(SOCKET_PATH)?;
 
         println!("[STREAM OK] Closing listener with active/pending connections test passed.");
         Ok(())
@@ -597,6 +597,7 @@ pub mod stream_tests {
             assert_eq!(&buf[..bytes_read as usize], b"live");
             unsafe { close(accepted_fd) };
             unsafe { close(listener_fd) };
+            remove_file(SOCKET_PATH)?;
             Ok(())
         });
 
@@ -639,7 +640,6 @@ pub mod stream_tests {
 
         client_thread.join().unwrap()?;
         unsafe { close(client_fd) };
-        remove_file(SOCKET_PATH)?;
         Ok(())
     }
 
