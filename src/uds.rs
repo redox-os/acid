@@ -91,15 +91,17 @@ pub mod dgram_tests {
         };
         assert!(bind_result >= 0);
 
+        let current_directory = std::env::current_dir().expect("Failed to get current directory");
+
         println!("[DGRAM] fpath...");
-        let mut buffer = [0u8; 40];
+        let mut buffer = [0u8; 256];
         let bytes_read =
             syscall::fpath(server_socket as usize, &mut buffer).map_err(from_syscall_error)?;
-        // assert_eq!(bytes_read, 33);
-        // assert_eq!(
-        //     &buffer[..33],
-        //     format!("/scheme/uds_dgram/{}", SOCKET_PATH).as_bytes()
-        // );
+        let expected_path_str = format!(
+            "/scheme/uds_dgram{}/{}",
+            current_directory.display(),
+            SOCKET_PATH
+        );
 
         println!("[DGRAM] Bind socket again (should fail)");
         let bind_result = unsafe {
@@ -371,14 +373,14 @@ pub mod stream_tests {
         println!("[STREAM Server] Socket bound to {}", SOCKET_PATH);
 
         println!("[STREAM] fpath...");
-        let mut buffer = [0u8; 40];
+        let mut buffer = [0u8; 256];
         let bytes_read =
             syscall::fpath(listener_fd as usize, &mut buffer).map_err(from_syscall_error)?;
-        // assert_eq!(bytes_read, 35);
-        // assert_eq!(
-        //     &buffer[..35],
-        //     format!("/scheme/uds_stream/{}", SOCKET_PATH).as_bytes()
-        // );
+        let expected_path_str = format!(
+            "/scheme/uds_stream{}/{}",
+            current_directory.display(),
+            SOCKET_PATH
+        );
 
         println!("[STREAM] Bind socket again (should fail)");
         let bind_result = unsafe {
