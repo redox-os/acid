@@ -372,6 +372,8 @@ pub mod stream_tests {
         }
         println!("[STREAM Server] Socket bound to {}", SOCKET_PATH);
 
+        let current_directory = std::env::current_dir().expect("Failed to get current directory");
+
         println!("[STREAM] fpath...");
         let mut buffer = [0u8; 256];
         let bytes_read =
