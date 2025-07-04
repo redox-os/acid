@@ -526,7 +526,7 @@ pub mod stream_tests {
         assert_eq!(connect_result, -1, "Connect from client B should fail");
         let err = io::Error::last_os_error();
         println!("[Client B] connect() failed as expected with: {}", err);
-        assert_eq!(err.raw_os_error(), Some(libc::ECONNREFUSED));
+        assert_eq!(err.raw_os_error(), Some(libc::ENOENT));
 
         client_thread.join().unwrap()?;
         unsafe { close(client_fd) };
