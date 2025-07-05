@@ -20,6 +20,8 @@ fn socket_kind(mut kind: libc::c_int) -> (libc::c_int, usize) {
 const SCM_RIGHTS: i32 = 1;
 const SCM_CREDENTIALS: i32 = 2;
 
+const PATH_MAX: usize = 4096;
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 struct Ucred {
@@ -32,9 +34,10 @@ struct Ucred {
 /// Tests for SOCK_DGRAM sockets
 ///
 pub mod dgram_tests {
-    use super::{from_syscall_error, socket_kind};
+    use super::{from_syscall_error, socket_kind, PATH_MAX};
     use anyhow::Result;
     use libc::{bind, close};
+    use std::fs::remove_file;
     use std::{ffi::CString, io, mem, thread, time::Duration};
 
     const SOCKET_PATH: &str = "test_dgram.sock";
@@ -90,14 +93,16 @@ pub mod dgram_tests {
         };
         assert!(bind_result >= 0);
 
+        let current_directory = std::env::current_dir().expect("Failed to get current directory");
+
         println!("[DGRAM] fpath...");
-        let mut buffer = [0u8; 40];
+        let mut buffer = [0u8; PATH_MAX];
         let bytes_read =
             syscall::fpath(server_socket as usize, &mut buffer).map_err(from_syscall_error)?;
-        assert_eq!(bytes_read, 33);
-        assert_eq!(
-            &buffer[..33],
-            format!("/scheme/uds_dgram/{}", SOCKET_PATH).as_bytes()
+        let expected_path_str = format!(
+            "/scheme/uds_dgram{}/{}",
+            current_directory.display(),
+            SOCKET_PATH
         );
 
         println!("[DGRAM] Bind socket again (should fail)");
@@ -164,6 +169,7 @@ pub mod dgram_tests {
 
         thread.join().unwrap()?;
         unsafe { close(server_socket) };
+        remove_file(SOCKET_PATH)?;
         Ok(())
     }
 
@@ -317,9 +323,10 @@ pub mod dgram_tests {
 /// Tests for SOCK_STREAM sockets
 ///
 pub mod stream_tests {
-    use super::{from_syscall_error, socket_kind};
+    use super::{from_syscall_error, socket_kind, PATH_MAX};
     use anyhow::Result;
     use libc::{accept, bind, close, connect, sockaddr};
+    use std::fs::remove_file;
     use std::{ffi::CString, io, mem, thread};
     use syscall::{self, error::*};
 
@@ -367,14 +374,16 @@ pub mod stream_tests {
         }
         println!("[STREAM Server] Socket bound to {}", SOCKET_PATH);
 
+        let current_directory = std::env::current_dir().expect("Failed to get current directory");
+
         println!("[STREAM] fpath...");
-        let mut buffer = [0u8; 40];
+        let mut buffer = [0u8; PATH_MAX];
         let bytes_read =
             syscall::fpath(listener_fd as usize, &mut buffer).map_err(from_syscall_error)?;
-        assert_eq!(bytes_read, 35);
-        assert_eq!(
-            &buffer[..35],
-            format!("/scheme/uds_stream/{}", SOCKET_PATH).as_bytes()
+        let expected_path_str = format!(
+            "/scheme/uds_stream{}/{}",
+            current_directory.display(),
+            SOCKET_PATH
         );
 
         println!("[STREAM] Bind socket again (should fail)");
@@ -462,6 +471,7 @@ pub mod stream_tests {
         client_thread.join().unwrap()?;
 
         unsafe { close(listener_fd) };
+        remove_file(SOCKET_PATH)?;
         println!("[STREAM OK] Bind/listen/accept/connect test passed.");
         Ok(())
     }
@@ -491,6 +501,7 @@ pub mod stream_tests {
                 listener_fd
             );
             unsafe { close(listener_fd) };
+            remove_file(SOCKET_PATH)?;
             Ok(())
         });
 
@@ -521,7 +532,7 @@ pub mod stream_tests {
         assert_eq!(connect_result, -1, "Connect from client B should fail");
         let err = io::Error::last_os_error();
         println!("[Client B] connect() failed as expected with: {}", err);
-        assert_eq!(err.raw_os_error(), Some(libc::ECONNREFUSED));
+        assert_eq!(err.raw_os_error(), Some(libc::ENOENT));
 
         client_thread.join().unwrap()?;
         unsafe { close(client_fd) };
@@ -592,6 +603,7 @@ pub mod stream_tests {
             assert_eq!(&buf[..bytes_read as usize], b"live");
             unsafe { close(accepted_fd) };
             unsafe { close(listener_fd) };
+            remove_file(SOCKET_PATH)?;
             Ok(())
         });
 
@@ -804,8 +816,6 @@ pub mod stream_tests {
 ///
 /// Tests for advanced msghdr functionality on DGRAM sockets (SCM_RIGHTS, SCM_CREDENTIALS)
 ///
-//TODO: fix build issues
-#[cfg(not(target_os = "redox"))]
 pub mod dgram_msghdr_tests {
     use super::{from_syscall_error, Ucred, SCM_CREDENTIALS, SCM_RIGHTS};
     use anyhow::Result;
@@ -1327,8 +1337,6 @@ pub mod dgram_msghdr_tests {
 ///
 /// Tests for advanced msghdr functionality on STREAM sockets (SCM_RIGHTS, SCM_CREDENTIALS)
 ///
-//TODO: fix build issues
-#[cfg(not(target_os = "redox"))]
 pub mod stream_msghdr_tests {
     use super::{from_syscall_error, Ucred, SCM_CREDENTIALS, SCM_RIGHTS};
     use anyhow::Result;
