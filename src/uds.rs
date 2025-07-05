@@ -20,6 +20,8 @@ fn socket_kind(mut kind: libc::c_int) -> (libc::c_int, usize) {
 const SCM_RIGHTS: i32 = 1;
 const SCM_CREDENTIALS: i32 = 2;
 
+const PATH_MAX: usize = 4096;
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 struct Ucred {
@@ -32,7 +34,7 @@ struct Ucred {
 /// Tests for SOCK_DGRAM sockets
 ///
 pub mod dgram_tests {
-    use super::{from_syscall_error, socket_kind};
+    use super::{from_syscall_error, socket_kind, PATH_MAX};
     use anyhow::Result;
     use libc::{bind, close};
     use std::fs::remove_file;
@@ -94,7 +96,7 @@ pub mod dgram_tests {
         let current_directory = std::env::current_dir().expect("Failed to get current directory");
 
         println!("[DGRAM] fpath...");
-        let mut buffer = [0u8; 256];
+        let mut buffer = [0u8; PATH_MAX];
         let bytes_read =
             syscall::fpath(server_socket as usize, &mut buffer).map_err(from_syscall_error)?;
         let expected_path_str = format!(
@@ -321,7 +323,7 @@ pub mod dgram_tests {
 /// Tests for SOCK_STREAM sockets
 ///
 pub mod stream_tests {
-    use super::{from_syscall_error, socket_kind};
+    use super::{from_syscall_error, socket_kind, PATH_MAX};
     use anyhow::Result;
     use libc::{accept, bind, close, connect, sockaddr};
     use std::fs::remove_file;
@@ -375,7 +377,7 @@ pub mod stream_tests {
         let current_directory = std::env::current_dir().expect("Failed to get current directory");
 
         println!("[STREAM] fpath...");
-        let mut buffer = [0u8; 256];
+        let mut buffer = [0u8; PATH_MAX];
         let bytes_read =
             syscall::fpath(listener_fd as usize, &mut buffer).map_err(from_syscall_error)?;
         let expected_path_str = format!(
