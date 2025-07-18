@@ -967,7 +967,11 @@ fn openat_test() -> Result<()> {
         let file_fd = syscall::open(&test_file, O_RDONLY)?;
         let notdir_result = syscall::openat(file_fd, "some_file", O_RDONLY)
             .expect_err("Expected an error for not directory");
-        assert_eq!(notdir_result.errno, syscall::ENOTDIR, "Expected ENOTDIR, got: {notdir_result}");
+        assert_eq!(
+            notdir_result.errno,
+            syscall::ENOTDIR,
+            "Expected ENOTDIR, got: {notdir_result}"
+        );
 
         let _ = syscall::close(file_fd);
         std::fs::remove_file(&test_file)?;
@@ -1058,7 +1062,11 @@ fn openat_test() -> Result<()> {
     // Error case - non-existent file
     let non_existent = syscall::openat(raw_fd as _, "non_existent", O_RDWR)
         .expect_err("Expected an error for non-existent file");
-    assert_eq!(non_existent.errno, syscall::ENOENT, "Expected ENOENT, got: {non_existent}");
+    assert_eq!(
+        non_existent.errno,
+        syscall::ENOENT,
+        "Expected ENOENT, got: {non_existent}"
+    );
 
     // Cleanup
     let _ = syscall::close(raw_fd as _);
@@ -1142,6 +1150,7 @@ fn main() {
     tests.insert("waitpid_transitive_queue", proc::waitpid_transitive_queue);
     tests.insert("pgrp_lifetime", proc::pgrp_lifetime);
     tests.insert("waitpid_eintr", proc::waitpid_eintr);
+    tests.insert("raise_correct_sig_group", proc::raise_correct_sig_group);
     tests.insert("uds_dgram", uds::dgram_tests::run_all);
     tests.insert("uds_stream", uds::stream_tests::run_all);
     //TODO: fix build issues: tests.insert("uds_dgram_msghdr", uds::dgram_msghdr_tests::run_all);

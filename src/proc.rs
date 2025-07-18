@@ -6,7 +6,9 @@
 
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
+use std::mem::MaybeUninit;
 use std::os::fd::{AsRawFd, IntoRawFd};
+use std::ptr::addr_of_mut;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -870,5 +872,35 @@ pub fn waitpid_eintr() -> Result<()> {
             assert_eq!(wait::waitpid(child, None), Ok(WaitStatus::Exited(child, 0)));
             Ok(())
         }
+    }
+}
+pub fn raise_correct_sig_group() -> Result<()> {
+    extern "C" fn handler(s: libc::c_int) {
+        if s == 3 {
+            std::process::exit(1);
+        }
+    }
+    //assert!((libc::SIGRTMIN()..=libc::SIGRTMAX()).contains(&35)); // TODO: not defined
+    unsafe {
+        let mut sa: MaybeUninit<libc::sigaction> = MaybeUninit::uninit();
+        addr_of_mut!((*sa.as_mut_ptr()).sa_flags).write(0);
+        libc::sigemptyset(addr_of_mut!((*sa.as_mut_ptr()).sa_mask));
+        addr_of_mut!((*sa.as_mut_ptr()).sa_sigaction).write(handler as usize);
+
+        assert_eq!(libc::sigaction(3, sa.as_ptr(), core::ptr::null_mut()), 0);
+        assert_eq!(libc::sigaction(35, sa.as_ptr(), core::ptr::null_mut()), 0);
+    }
+
+    if let ForkResult::Parent { child } = unsafe { unistd::fork().unwrap() } {
+        assert_eq!(
+            wait::waitpid(child, Some(WaitPidFlag::empty())).unwrap(),
+            WaitStatus::Exited(child, 0)
+        );
+        Ok(())
+    } else {
+        unsafe {
+            libc::raise(35);
+        }
+        std::process::exit(0);
     }
 }
