@@ -104,11 +104,13 @@ pub mod dgram_tests {
             current_directory.display(),
             SOCKET_PATH
         );
+        let fpath_str = std::str::from_utf8(&buffer[..bytes_read])
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid UTF-8 in fpath"))?;
         assert_eq!(
-            std::str::from_utf8(&buffer[..bytes_read]).unwrap(),
-            expected_path_str,
+            fpath_str, expected_path_str,
             "fpath did not return the expected path"
         );
+        println!("[DGRAM] fpath returned: {}", fpath_str);
 
         println!("[DGRAM] Bind socket again (should fail)");
         let bind_result = unsafe {
@@ -390,11 +392,13 @@ pub mod stream_tests {
             current_directory.display(),
             SOCKET_PATH
         );
+        let fpath_str = std::str::from_utf8(&buffer[..bytes_read])
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid UTF-8 in fpath"))?;
         assert_eq!(
-            std::str::from_utf8(&buffer[..bytes_read]).unwrap(),
-            expected_path_str,
+            fpath_str, expected_path_str,
             "fpath did not return the expected path"
         );
+        println!("[STREAM] fpath returned: {}", fpath_str);
 
         println!("[STREAM] Bind socket again (should fail)");
         let bind_result = unsafe {
