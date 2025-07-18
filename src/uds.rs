@@ -104,6 +104,11 @@ pub mod dgram_tests {
             current_directory.display(),
             SOCKET_PATH
         );
+        assert_eq!(
+            std::str::from_utf8(&buffer[..bytes_read]).unwrap(),
+            expected_path_str,
+            "fpath did not return the expected path"
+        );
 
         println!("[DGRAM] Bind socket again (should fail)");
         let bind_result = unsafe {
@@ -384,6 +389,11 @@ pub mod stream_tests {
             "/scheme/uds_stream{}/{}",
             current_directory.display(),
             SOCKET_PATH
+        );
+        assert_eq!(
+            std::str::from_utf8(&buffer[..bytes_read]).unwrap(),
+            expected_path_str,
+            "fpath did not return the expected path"
         );
 
         println!("[STREAM] Bind socket again (should fail)");
