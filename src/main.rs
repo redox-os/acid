@@ -1153,8 +1153,8 @@ fn main() {
     tests.insert("raise_correct_sig_group", proc::raise_correct_sig_group);
     tests.insert("uds_dgram", uds::dgram_tests::run_all);
     tests.insert("uds_stream", uds::stream_tests::run_all);
-    //TODO: fix build issues: tests.insert("uds_dgram_msghdr", uds::dgram_msghdr_tests::run_all);
-    //TODO: fix build issues: tests.insert("uds_stream_msghdr", uds::stream_msghdr_tests::run_all);
+    tests.insert("uds_dgram_msghdr", uds::dgram_msghdr_tests::run_all);
+    tests.insert("uds_stream_msghdr", uds::stream_msghdr_tests::run_all);
 
     let mut ran_test = false;
     for arg in env::args().skip(1) {
