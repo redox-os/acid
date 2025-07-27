@@ -45,6 +45,21 @@ fn send_fds(sender_sock: usize, fds_to_send: &[usize]) -> io::Result<()> {
     Ok(())
 }
 
+fn send_fds_with_clone(sender_sock: usize, fds_to_send: &[usize]) -> io::Result<()> {
+    let mut payload: Vec<u8> = Vec::new();
+    fds_to_send.iter().for_each(|fd| {
+        payload.extend_from_slice(&fd.to_ne_bytes());
+    });
+    redox_rt::sys::sys_call(
+        sender_sock,
+        &mut payload,
+        CallFlags::WRITE | CallFlags::FD | CallFlags::CLONE,
+        &[],
+    )
+    .map_err(|e| from_syscall_error(e.into()))?;
+    Ok(())
+}
+
 fn receive_fds(receiver_sock: usize, dst_fds: &mut [usize], flags: CallFlags) -> io::Result<()> {
     let dst_fds_bytes: &mut [u8] = unsafe {
         core::slice::from_raw_parts_mut(
@@ -66,13 +81,11 @@ pub fn run_all() -> io::Result<()> {
     let scheme_path = "/scheme/chan";
     println!("\n--- FdTbl Indirect Tests ---");
 
-    println!("[TEST] Automatic allocation to POSIX table");
+    println!("[TEST] Automatic allocation to POSIX table and sends with clone and should failed with EBADF");
     let (receiver, sender) = create_socket_pair()?;
     let fd1 = create_dummy_fd("test_posix_auto1")?;
     let fd2 = create_dummy_fd("test_posix_auto2")?;
-    send_fds(sender, &[fd1, fd2])?;
-    syscall::close(fd1).unwrap();
-    syscall::close(fd2).unwrap();
+    send_fds_with_clone(sender, &[fd1, fd2])?;
 
     let mut new_fds_posix = [0_usize; 2];
     receive_fds(receiver, &mut new_fds_posix, CallFlags::empty())?;
@@ -81,12 +94,26 @@ pub fn run_all() -> io::Result<()> {
     verify_fpath(new_fds_posix[0], scheme_path, "test_posix_auto1")?;
     verify_fpath(new_fds_posix[1], scheme_path, "test_posix_auto2")?;
 
+    send_fds(sender, &[fd1, fd2])?;
+
+    let mut new_fds_posix = [0_usize; 2];
+    receive_fds(receiver, &mut new_fds_posix, CallFlags::empty())?;
+    println!("   -> Received FDs: {:?}", new_fds_posix);
+    assert!(new_fds_posix[0] < 10 && new_fds_posix[1] < 10);
+    verify_fpath(new_fds_posix[0], scheme_path, "test_posix_auto1")?;
+    verify_fpath(new_fds_posix[1], scheme_path, "test_posix_auto2")?;
+
+    let result = send_fds(sender, &[fd1, fd2]);
+    assert!(result.is_err(), "Expected an error but got Ok");
+    if let Err(e) = result {
+        println!("   -> Received expected error: {:?}", e);
+        assert_eq!(e.raw_os_error(), Some(syscall::EBADF as i32));
+    }
+
     println!("[TEST] Automatic allocation to upper table");
     let fd3 = create_dummy_fd("test_upper_auto1")?;
     let fd4 = create_dummy_fd("test_upper_auto2")?;
     send_fds(sender, &[fd3, fd4])?;
-    syscall::close(fd3).unwrap();
-    syscall::close(fd4).unwrap();
 
     let mut new_fds_upper = [0_usize; 2];
     receive_fds(receiver, &mut new_fds_upper, CallFlags::FD_UPPER)?;
@@ -100,8 +127,6 @@ pub fn run_all() -> io::Result<()> {
     let fd5 = create_dummy_fd("test_upper_manual1")?;
     let fd6 = create_dummy_fd("test_upper_manual2")?;
     send_fds(sender, &[fd5, fd6])?;
-    syscall::close(fd5).unwrap();
-    syscall::close(fd6).unwrap();
 
     let mut manual_fds = [100 | UPPER_FDTBL_TAG, 200 | UPPER_FDTBL_TAG];
     receive_fds(
@@ -113,15 +138,10 @@ pub fn run_all() -> io::Result<()> {
     verify_fpath(manual_fds[0], scheme_path, "test_upper_manual1")?;
     verify_fpath(manual_fds[1], scheme_path, "test_upper_manual2")?;
 
-    syscall::close(receiver).unwrap();
-    syscall::close(sender).unwrap();
-
     println!("[TEST] Manual allocation to upper table with invalid slots range (should fail with EMFILE)");
     let fd5 = create_dummy_fd("test_upper_manual1")?;
     let fd6 = create_dummy_fd("test_upper_manual2")?;
     send_fds(sender, &[fd5, fd6])?;
-    syscall::close(fd5).unwrap();
-    syscall::close(fd6).unwrap();
 
     let mut manual_fds = [100 | UPPER_FDTBL_TAG, (65_536 + 1) | UPPER_FDTBL_TAG];
     let result = receive_fds(
@@ -135,29 +155,17 @@ pub fn run_all() -> io::Result<()> {
         assert_eq!(e.errno, Some(syscall::EMFILE as i32));
     }
 
-    syscall::close(receiver).unwrap();
-    syscall::close(sender).unwrap();
-
     println!("[TEST] Manual upper allocation to an occupied slot (should fail with EEXIST)");
     let (receiver, sender) = create_socket_pair()?;
 
     let obstacle_fd = create_dummy_fd("obstacle")?;
-    send_fds(sender, &[obstacle_fd])?;
-    syscall::close(obstacle_fd)?;
+    syscall::dup2(obstacle_fd, 150 | UPPER_FDTBL_TAG, &[])?;
 
-    let mut target_slot = [150 | UPPER_FDTBL_TAG];
-    receive_fds(
-        receiver,
-        &mut target_slot,
-        CallFlags::FD_UPPER | CallFlags::MANUAL_FD,
-    )?;
-    println!("   -> Occupied slot {} successfully.", target_slot[0]);
+    let failing_fd1 = create_dummy_fd("should_fail1")?;
+    let failing_fd2 = create_dummy_fd("should_fail2")?;
+    send_fds(sender, &[failing_fd1, failing_fd2])?;
 
-    let failing_fd = create_dummy_fd("should_fail")?;
-    send_fds(sender, &[failing_fd])?;
-    syscall::close(failing_fd)?;
-
-    let mut failing_slot = [150 | UPPER_FDTBL_TAG];
+    let mut failing_slot = [50 | UPPER_FDTBL_TAG, 150 | UPPER_FDTBL_TAG];
     let result = receive_fds(
         receiver,
         &mut failing_slot,
@@ -170,7 +178,6 @@ pub fn run_all() -> io::Result<()> {
         assert_eq!(e.errno, Some(syscall::EEXIST as i32));
     }
 
-    syscall::close(target_slot[0])?;
     syscall::close(receiver)?;
     syscall::close(sender)?;
 
