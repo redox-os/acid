@@ -149,9 +149,9 @@ pub fn run_all() -> anyhow::Result<()> {
     verify_fpath(manual_fds[1], "test_upper_manual2")?;
 
     println!("[TEST] Manual allocation to upper table with invalid slots range (should fail with EMFILE)");
-    let fd5 = prepare_fd_to_send("test_upper_manual1")?;
-    let fd6 = prepare_fd_to_send("test_upper_manual2")?;
-    send_fds(sender, &[fd5, fd6]).map_err(from_syscall_error)?;
+    let failing_fd1 = prepare_fd_to_send("should_fail1")?;
+    let failing_fd2 = prepare_fd_to_send("should_fail2")?;
+    send_fds(sender, &[failing_fd1, failing_fd2]).map_err(from_syscall_error)?;
 
     let mut manual_fds = [100 | UPPER_FDTBL_TAG, (65_536 + 1) | UPPER_FDTBL_TAG];
     println!("Receiving FDs with manual allocation to upper table with invalid slots range");
@@ -168,9 +168,9 @@ pub fn run_all() -> anyhow::Result<()> {
     let obstacle_fd = prepare_fd_to_send("obstacle")?;
     syscall::dup2(obstacle_fd, 150 | UPPER_FDTBL_TAG, &[])?;
 
-    let failing_fd1 = prepare_fd_to_send("should_fail1")?;
-    let failing_fd2 = prepare_fd_to_send("should_fail2")?;
-    send_fds(sender, &[failing_fd1, failing_fd2]).map_err(from_syscall_error)?;
+    let failing_fd3 = prepare_fd_to_send("should_fail3")?;
+    let failing_fd4 = prepare_fd_to_send("should_fail4")?;
+    send_fds(sender, &[failing_fd3, failing_f4]).map_err(from_syscall_error)?;
 
     let mut failing_slot = [50 | UPPER_FDTBL_TAG, 150 | UPPER_FDTBL_TAG];
     println!("Receiving FDs with manual allocation to upper table with an occupied slot");
