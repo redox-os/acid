@@ -170,7 +170,7 @@ pub fn run_all() -> anyhow::Result<()> {
 
     let failing_fd3 = prepare_fd_to_send("should_fail3")?;
     let failing_fd4 = prepare_fd_to_send("should_fail4")?;
-    send_fds(sender, &[failing_fd3, failing_f4]).map_err(from_syscall_error)?;
+    send_fds(sender, &[failing_fd3, failing_fd4]).map_err(from_syscall_error)?;
 
     let mut failing_slot = [50 | UPPER_FDTBL_TAG, 150 | UPPER_FDTBL_TAG];
     println!("Receiving FDs with manual allocation to upper table with an occupied slot");
