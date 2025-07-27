@@ -325,7 +325,7 @@ fn test_send_zero_fds() -> anyhow::Result<()> {
 
     let mut buffer = [0; 1];
     println!("  -> Receiving with a non-blocking flag to check for empty message");
-    let result = receive_fds(receiver, &mut buffer, CallFlags::NONBLOCK);
+    let result = receive_fds(receiver, &mut buffer, CallFlags::empty());
 
     assert!(result.is_err(), "Expected an error for no data but got Ok");
     if let Err(e) = result {
