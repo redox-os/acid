@@ -127,7 +127,8 @@ pub fn run_all() -> anyhow::Result<()> {
     let fd4 = prepare_fd_to_send("test_upper_auto2")?;
     send_fds(sender, &[fd3, fd4]).map_err(from_syscall_error)?;
 
-    let mut new_fds_upper = [0_usize; 2];
+    let mut new_fds_upper = [usize::MAX; 2];
+    println!("Receiving FDs with automatic allocation to upper table");
     receive_fds(receiver, &mut new_fds_upper, CallFlags::FD_UPPER)?;
     println!("   -> Received FDs: {:?}", new_fds_upper);
     assert_eq!(new_fds_upper[0] & UPPER_FDTBL_TAG, UPPER_FDTBL_TAG);
@@ -140,7 +141,8 @@ pub fn run_all() -> anyhow::Result<()> {
     let fd6 = prepare_fd_to_send("test_upper_manual2")?;
     send_fds(sender, &[fd5, fd6]).map_err(from_syscall_error)?;
 
-    let mut manual_fds = [100 | UPPER_FDTBL_TAG, 200 | UPPER_FDTBL_TAG];
+    let mut manual_fds = [10 | UPPER_FDTBL_TAG, 20 | UPPER_FDTBL_TAG];
+    println!("Receiving FDs with manual allocation to upper table");
     receive_fds(receiver, &mut manual_fds, CallFlags::FD_UPPER)?;
     println!("   -> Received FDs into slots: {:?}", manual_fds);
     verify_fpath(manual_fds[0], "test_upper_manual1")?;
@@ -152,6 +154,7 @@ pub fn run_all() -> anyhow::Result<()> {
     send_fds(sender, &[fd5, fd6]).map_err(from_syscall_error)?;
 
     let mut manual_fds = [100 | UPPER_FDTBL_TAG, (65_536 + 1) | UPPER_FDTBL_TAG];
+    println!("Receiving FDs with manual allocation to upper table with invalid slots range");
     let result = receive_fds(receiver, &mut manual_fds, CallFlags::FD_UPPER);
     assert!(result.is_err(), "Expected an error but got Ok");
     if let Err(e) = result {
@@ -170,6 +173,7 @@ pub fn run_all() -> anyhow::Result<()> {
     send_fds(sender, &[failing_fd1, failing_fd2]).map_err(from_syscall_error)?;
 
     let mut failing_slot = [50 | UPPER_FDTBL_TAG, 150 | UPPER_FDTBL_TAG];
+    println!("Receiving FDs with manual allocation to upper table with an occupied slot");
     let result = receive_fds(receiver, &mut failing_slot, CallFlags::FD_UPPER);
 
     assert!(result.is_err(), "Expected an error but got Ok");
