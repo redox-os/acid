@@ -145,7 +145,7 @@ pub fn run_all() -> anyhow::Result<()> {
     assert!(result.is_err(), "Expected an error but got Ok");
     if let Err(e) = result {
         println!("   -> Received expected error: {:?}", e);
-        assert_eq!(e.errno, Some(syscall::EMFILE as i32));
+        assert_eq!(e.errno, syscall::EMFILE as i32);
     }
 
     println!("[TEST] Manual upper allocation to an occupied slot (should fail with EEXIST)");
@@ -164,7 +164,7 @@ pub fn run_all() -> anyhow::Result<()> {
     assert!(result.is_err(), "Expected an error but got Ok");
     if let Err(e) = result {
         println!("   -> Received expected error: {:?}", e);
-        assert_eq!(e.errno, Some(syscall::EEXIST as i32));
+        assert_eq!(e.errno, syscall::EEXIST as i32);
     }
 
     syscall::close(receiver)?;
