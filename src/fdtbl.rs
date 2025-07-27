@@ -58,7 +58,11 @@ fn send_fds_with_clone(sender_sock: usize, fds_to_send: &[usize]) -> Result<(), 
     Ok(())
 }
 
-fn receive_fds(receiver_sock: usize, dst_fds: &mut [usize], flags: CallFlags) -> io::Result<()> {
+fn receive_fds(
+    receiver_sock: usize,
+    dst_fds: &mut [usize],
+    flags: CallFlags,
+) -> Result<(), SyscallError> {
     let dst_fds_bytes: &mut [u8] = unsafe {
         core::slice::from_raw_parts_mut(
             dst_fds.as_mut_ptr() as *mut u8,
@@ -70,8 +74,7 @@ fn receive_fds(receiver_sock: usize, dst_fds: &mut [usize], flags: CallFlags) ->
         dst_fds_bytes,
         CallFlags::READ | CallFlags::FD | flags,
         &[],
-    )
-    .map_err(|e| from_syscall_error(e.into()))?;
+    )?;
     Ok(())
 }
 
@@ -105,7 +108,7 @@ pub fn run_all() -> anyhow::Result<()> {
     assert!(result.is_err(), "Expected an error but got Ok");
     if let Err(e) = result {
         println!("   -> Received expected error: {:?}", e);
-        assert_eq!(e.errno, Some(syscall::EBADF as i32));
+        assert_eq!(e.errno, syscall::EBADF as i32);
     }
 
     println!("[TEST] Automatic allocation to upper table");
