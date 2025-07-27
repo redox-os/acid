@@ -7,14 +7,18 @@ edition = "2021"
 [dependencies]
 libc = "0.2"
 spin = "0.9"
-redox_syscall = { version = "0.5.11", features = ["std"] }
+redox_syscall = { git = "https://gitlab.redox-os.org/Ibuki.O/syscall.git", branch = "table-flags", features = ["std"] }
 redox-scheme = "0.6"
 anyhow = "1.0.81"
 nix = { version = "0.29.0", features = ["process", "signal"] }
 signal-hook = "0.3.17"
+redox-rt = { git = "https://gitlab.redox-os.org/redox-os/relibc.git", branch = "master"}
 
 #strace = { git = "https://gitlab.redox-os.org/redox-os/strace-redox", default-features = false }
 #strace = { path = "../../strace/source", default-features = false }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86 = "0.47.0"
+
+[patch.crates-io]
+redox_syscall = { git = "https://gitlab.redox-os.org/Ibuki.O/syscall.git", branch = "table-flags", features = ["std"] }
