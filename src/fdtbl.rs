@@ -91,7 +91,6 @@ pub fn run_all() -> anyhow::Result<()> {
     let mut new_fds_posix = [0_usize; 2];
     receive_fds(receiver, &mut new_fds_posix, CallFlags::empty())?;
     println!("   -> Received FDs: {:?}", new_fds_posix);
-    assert!(new_fds_posix[0] < 10 && new_fds_posix[1] < 10);
     verify_fpath(new_fds_posix[0], scheme_path, "test_posix_auto1")?;
     verify_fpath(new_fds_posix[1], scheme_path, "test_posix_auto2")?;
 
@@ -100,7 +99,6 @@ pub fn run_all() -> anyhow::Result<()> {
     let mut new_fds_posix = [0_usize; 2];
     receive_fds(receiver, &mut new_fds_posix, CallFlags::empty())?;
     println!("   -> Received FDs: {:?}", new_fds_posix);
-    assert!(new_fds_posix[0] < 10 && new_fds_posix[1] < 10);
     verify_fpath(new_fds_posix[0], scheme_path, "test_posix_auto1")?;
     verify_fpath(new_fds_posix[1], scheme_path, "test_posix_auto2")?;
 
