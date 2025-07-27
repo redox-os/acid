@@ -100,22 +100,8 @@ pub fn run_all() -> anyhow::Result<()> {
     let fd2 = prepare_fd_to_send("test_posix_auto2")?;
     println!("Sending FDs with clone and automatic allocation to POSIX table");
     send_fds_with_clone(sender, &[fd1, fd2]).map_err(from_syscall_error)?;
-
-    let mut new_fds_posix = [0_usize; 2];
-    receive_fds(receiver, &mut new_fds_posix, CallFlags::empty())?;
-    println!("   -> Received FDs: {:?}", new_fds_posix);
-    verify_fpath(new_fds_posix[0], "test_posix_auto1")?;
-    verify_fpath(new_fds_posix[1], "test_posix_auto2")?;
-
     println!("Sending FDs with move)");
     send_fds(sender, &[fd1, fd2]).map_err(from_syscall_error)?;
-
-    let mut new_fds_posix = [0_usize; 2];
-    receive_fds(receiver, &mut new_fds_posix, CallFlags::empty())?;
-    println!("   -> Received FDs: {:?}", new_fds_posix);
-    verify_fpath(new_fds_posix[0], "test_posix_auto1")?;
-    verify_fpath(new_fds_posix[1], "test_posix_auto2")?;
-
     println!("Sending moved FDs (should fail with EBADF)");
     let result = send_fds(sender, &[fd1, fd2]);
     assert!(result.is_err(), "Expected an error but got Ok");
@@ -123,6 +109,18 @@ pub fn run_all() -> anyhow::Result<()> {
         println!("   -> Received expected error: {:?}", e);
         assert_eq!(e.errno, syscall::EBADF as i32);
     }
+
+    let mut new_fds_posix = [0_usize; 2];
+    receive_fds(receiver, &mut new_fds_posix, CallFlags::empty())?;
+    println!("   -> Received FDs: {:?}", new_fds_posix);
+    verify_fpath(new_fds_posix[0], "test_posix_auto1")?;
+    verify_fpath(new_fds_posix[1], "test_posix_auto2")?;
+
+    let mut new_fds_posix = [0_usize; 2];
+    receive_fds(receiver, &mut new_fds_posix, CallFlags::empty())?;
+    println!("   -> Received FDs: {:?}", new_fds_posix);
+    verify_fpath(new_fds_posix[0], "test_posix_auto1")?;
+    verify_fpath(new_fds_posix[1], "test_posix_auto2")?;
 
     println!("[TEST] Automatic allocation to upper table");
     let fd3 = prepare_fd_to_send("test_upper_auto1")?;
