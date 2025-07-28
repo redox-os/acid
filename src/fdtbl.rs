@@ -1,4 +1,4 @@
-use libredox::Result;
+use libredox::error::Result;
 use std::mem;
 use syscall::CallFlags;
 use syscall::UPPER_FDTBL_TAG;
@@ -28,7 +28,7 @@ fn create_socket_pair() -> Result<(usize, usize)> {
     let mut fds = [-1, -1];
     let result = unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_DGRAM, 0, fds.as_mut_ptr()) };
     if result != 0 {
-        return Err(libredox::Error::new(result));
+        return Err(libredox::error::Error::new(result));
     }
     Ok((fds[0] as usize, fds[1] as usize))
 }
