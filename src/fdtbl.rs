@@ -1,25 +1,21 @@
+use libredox::Result;
 use std::{io, mem};
-use syscall::Error as SyscallError;
 use syscall::UPPER_FDTBL_TAG;
-use syscall::{self, CallFlags, Result};
+use syscall::{self, CallFlags};
 
-fn from_syscall_error(error: SyscallError) -> io::Error {
-    io::Error::from_raw_os_error(error.errno as i32)
-}
-
-fn prepare_fd_to_send(name: &str) -> io::Result<usize> {
-    let fd = syscall::open(
+fn prepare_fd_to_send(name: &str) -> Result<usize> {
+    let fd = libredox::call::open(
         format!("chan:{}", name).as_str(),
-        syscall::O_RDWR | syscall::O_CREAT | syscall::O_CLOEXEC,
-    )
-    .map_err(from_syscall_error)?;
+        libredox::flag::O_RDWR | libredox::flag::O_CREAT | libredox::flag::O_CLOEXEC,
+        0,
+    )?;
 
     Ok(fd)
 }
 
-fn verify_fpath(fd: usize, expected_name: &str) -> io::Result<()> {
+fn verify_fpath(fd: usize, expected_name: &str) -> Result<()> {
     let mut buffer = [0u8; 128];
-    let bytes_read = syscall::fpath(fd, &mut buffer).map_err(from_syscall_error)?;
+    let bytes_read = libredox::call::fpath(fd, &mut buffer)?;
     let path_str =
         std::str::from_utf8(&buffer[..bytes_read]).expect("fpath returned invalid UTF-8");
     let expected_path = format!("chan:{}", expected_name);
@@ -30,8 +26,9 @@ fn verify_fpath(fd: usize, expected_name: &str) -> io::Result<()> {
 
 fn create_socket_pair() -> io::Result<(usize, usize)> {
     let mut fds = [-1, -1];
-    if unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_DGRAM, 0, fds.as_mut_ptr()) } != 0 {
-        return Err(io::Error::last_os_error());
+    let result = unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_DGRAM, 0, fds.as_mut_ptr()) };
+    if result != 0 {
+        return Err(libredox::Error::new(result));
     }
     Ok((fds[0] as usize, fds[1] as usize))
 }
@@ -91,14 +88,14 @@ fn test_send_moved_fd_fails_with_ebadf() -> anyhow::Result<()> {
     assert!(result.is_err(), "Expected an error but got Ok");
     if let Err(e) = result {
         println!("    -> Received expected error: {:?}", e);
-        assert_eq!(e.errno, syscall::EBADF);
+        assert_eq!(e.errno, libredox::errno::EBADF);
     }
 
     let mut received_fd = [usize::MAX];
     receive_fds(receiver, &mut received_fd, CallFlags::empty())?;
-    syscall::close(received_fd[0])?;
-    syscall::close(receiver)?;
-    syscall::close(sender)?;
+    libredox::call::close(received_fd[0])?;
+    libredox::call::close(receiver)?;
+    libredox::call::close(sender)?;
 
     Ok(())
 }
@@ -116,10 +113,10 @@ fn test_send_cloned_fd_remains_valid() -> anyhow::Result<()> {
 
     let mut received_fd = [usize::MAX];
     receive_fds(receiver, &mut received_fd, CallFlags::empty())?;
-    syscall::close(received_fd[0])?;
-    syscall::close(fd)?;
-    syscall::close(receiver)?;
-    syscall::close(sender)?;
+    libredox::call::close(received_fd[0])?;
+    libredox::call::close(fd)?;
+    libredox::call::close(receiver)?;
+    libredox::call::close(sender)?;
 
     Ok(())
 }
@@ -139,10 +136,10 @@ fn test_auto_alloc_to_posix_table() -> anyhow::Result<()> {
     verify_fpath(new_fds[0], "posix_auto1")?;
     verify_fpath(new_fds[1], "posix_auto2")?;
 
-    syscall::close(new_fds[0])?;
-    syscall::close(new_fds[1])?;
-    syscall::close(receiver)?;
-    syscall::close(sender)?;
+    libredox::call::close(new_fds[0])?;
+    libredox::call::close(new_fds[1])?;
+    libredox::call::close(receiver)?;
+    libredox::call::close(sender)?;
 
     Ok(())
 }
@@ -164,10 +161,10 @@ fn test_auto_alloc_to_upper_table() -> anyhow::Result<()> {
     verify_fpath(new_fds[0], "upper_auto1")?;
     verify_fpath(new_fds[1], "upper_auto2")?;
 
-    syscall::close(new_fds[0])?;
-    syscall::close(new_fds[1])?;
-    syscall::close(receiver)?;
-    syscall::close(sender)?;
+    libredox::call::close(new_fds[0])?;
+    libredox::call::close(new_fds[1])?;
+    libredox::call::close(receiver)?;
+    libredox::call::close(sender)?;
 
     Ok(())
 }
@@ -187,10 +184,10 @@ fn test_manual_alloc_to_upper_table() -> anyhow::Result<()> {
     verify_fpath(manual_fds[0], "upper_manual1")?;
     verify_fpath(manual_fds[1], "upper_manual2")?;
 
-    syscall::close(manual_fds[0])?;
-    syscall::close(manual_fds[1])?;
-    syscall::close(receiver)?;
-    syscall::close(sender)?;
+    libredox::call::close(manual_fds[0])?;
+    libredox::call::close(manual_fds[1])?;
+    libredox::call::close(receiver)?;
+    libredox::call::close(sender)?;
 
     Ok(())
 }
@@ -207,11 +204,11 @@ fn test_manual_alloc_invalid_slot_fails_with_emfile() -> anyhow::Result<()> {
     assert!(result.is_err(), "Expected an error but got Ok");
     if let Err(e) = result {
         println!("  -> Received expected error: {:?}", e);
-        assert_eq!(e.errno, syscall::EMFILE);
+        assert_eq!(e.errno, libredox::errno::EMFILE);
     }
 
-    syscall::close(receiver)?;
-    syscall::close(sender)?;
+    libredox::call::close(receiver)?;
+    libredox::call::close(sender)?;
 
     Ok(())
 }
@@ -223,7 +220,7 @@ fn test_manual_alloc_to_occupied_slot_fails_with_eexist() -> anyhow::Result<()> 
     let obstacle_fd = prepare_fd_to_send("obstacle")?;
     let target_slot = 150 | UPPER_FDTBL_TAG;
     println!("  -> Placing an obstacle FD at slot {}", target_slot);
-    syscall::dup2(obstacle_fd, target_slot, &[])?;
+    libredox::call::dup2(obstacle_fd, target_slot, &[])?;
 
     let failing_fd = prepare_fd_to_send("should_fail_eexist")?;
     send_fds(sender, &[failing_fd])?;
@@ -234,11 +231,11 @@ fn test_manual_alloc_to_occupied_slot_fails_with_eexist() -> anyhow::Result<()> 
     assert!(result.is_err(), "Expected an error but got Ok");
     if let Err(e) = result {
         println!("  -> Received expected error: {:?}", e);
-        assert_eq!(e.errno, syscall::EEXIST);
+        assert_eq!(e.errno, libredox::errno::EEXIST);
     }
 
-    syscall::close(receiver)?;
-    syscall::close(sender)?;
+    libredox::call::close(receiver)?;
+    libredox::call::close(sender)?;
 
     Ok(())
 }
@@ -263,10 +260,10 @@ fn test_receive_buffer_too_small() -> anyhow::Result<()> {
     );
     if let Err(e) = result {
         println!("    -> Received expected error: {:?}", e);
-        assert_eq!(e.errno, syscall::EINVAL);
+        assert_eq!(e.errno, libredox::errno::EINVAL);
     }
-    syscall::close(receiver)?;
-    syscall::close(sender)?;
+    libredox::call::close(receiver)?;
+    libredox::call::close(sender)?;
 
     Ok(())
 }
@@ -290,11 +287,11 @@ fn test_receive_buffer_too_large() -> anyhow::Result<()> {
     );
     if let Err(e) = result {
         println!("    -> Received expected error: {:?}", e);
-        assert_eq!(e.errno, syscall::EINVAL);
+        assert_eq!(e.errno, libredx::EINVAL);
     }
 
-    syscall::close(receiver)?;
-    syscall::close(sender)?;
+    libredox::call::close(receiver)?;
+    libredox::call::close(sender)?;
 
     Ok(())
 }
@@ -314,11 +311,11 @@ fn test_send_zero_fds() -> anyhow::Result<()> {
     assert!(result.is_err(), "Expected an error for no data but got Ok");
     if let Err(e) = result {
         println!("  -> Received expected error: {:?}", e);
-        assert_eq!(e.errno, syscall::EAGAIN);
+        assert_eq!(e.errno, libredox::errno::EAGAIN);
     }
 
-    syscall::close(receiver)?;
-    syscall::close(sender)?;
+    libredox::call::close(receiver)?;
+    libredox::call::close(sender)?;
     Ok(())
 }
 
