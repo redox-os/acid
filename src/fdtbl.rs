@@ -1,7 +1,7 @@
 use libredox::Result;
-use std::{io, mem};
+use std::mem;
+use syscall::CallFlags;
 use syscall::UPPER_FDTBL_TAG;
-use syscall::{self, CallFlags};
 
 fn prepare_fd_to_send(name: &str) -> Result<usize> {
     let fd = libredox::call::open(
@@ -24,7 +24,7 @@ fn verify_fpath(fd: usize, expected_name: &str) -> Result<()> {
     Ok(())
 }
 
-fn create_socket_pair() -> io::Result<(usize, usize)> {
+fn create_socket_pair() -> Result<(usize, usize)> {
     let mut fds = [-1, -1];
     let result = unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_DGRAM, 0, fds.as_mut_ptr()) };
     if result != 0 {
@@ -287,7 +287,7 @@ fn test_receive_buffer_too_large() -> anyhow::Result<()> {
     );
     if let Err(e) = result {
         println!("    -> Received expected error: {:?}", e);
-        assert_eq!(e.errno, libredx::EINVAL);
+        assert_eq!(e.errno, libredox::errno::EINVAL);
     }
 
     libredox::call::close(receiver)?;
