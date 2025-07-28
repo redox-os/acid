@@ -17,8 +17,8 @@ fn prepare_fd_to_send(name: &str) -> io::Result<usize> {
     .map_err(from_syscall_error)?;
 
     let mut name_str = name.to_string();
-    let payload = unsafe { name_str.as_bytes_mut() };
-    redox_rt::sys::sys_call(
+    let payload = name_str.as_bytes();
+    libredox::call::call_wo(
         fd,
         payload,
         CallFlags::empty(),
@@ -53,12 +53,7 @@ fn send_fds(sender_sock: usize, fds_to_send: &[usize]) -> Result<usize, SyscallE
     for &fd in fds_to_send {
         payload.extend_from_slice(&fd.to_ne_bytes());
     }
-    redox_rt::sys::sys_call(
-        sender_sock,
-        &mut payload,
-        CallFlags::WRITE | CallFlags::FD,
-        &[],
-    )
+    libredox::call::call_wo(sender_sock, &payload, CallFlags::FD, &[])
 }
 
 fn send_fds_with_clone(sender_sock: usize, fds_to_send: &[usize]) -> Result<usize, SyscallError> {
@@ -66,10 +61,10 @@ fn send_fds_with_clone(sender_sock: usize, fds_to_send: &[usize]) -> Result<usiz
     for &fd in fds_to_send {
         payload.extend_from_slice(&fd.to_ne_bytes());
     }
-    redox_rt::sys::sys_call(
+    libredox::call::call_wo(
         sender_sock,
-        &mut payload,
-        CallFlags::WRITE | CallFlags::FD | CallFlags::FD_CLONE,
+        &payload,
+        CallFlags::FD | CallFlags::FD_CLONE,
         &[],
     )
 }
@@ -85,12 +80,7 @@ fn receive_fds(
             dst_fds.len() * mem::size_of::<usize>(),
         )
     };
-    redox_rt::sys::sys_call(
-        receiver_sock,
-        dst_fds_bytes,
-        CallFlags::READ | CallFlags::FD | flags,
-        &[],
-    )
+    libredox::call::call_ro(receiver_sock, dst_fds_bytes, CallFlags::FD | flags, &[])
 }
 
 fn test_send_moved_fd_fails_with_ebadf() -> anyhow::Result<()> {
