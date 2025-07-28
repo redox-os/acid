@@ -8,10 +8,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "libc",
- "libredox 0.1.8",
+ "libredox",
  "nix",
  "redox-scheme",
- "redox_syscall 0.5.17",
+ "redox_syscall",
  "signal-hook",
  "spin",
  "x86",
@@ -67,23 +67,13 @@ checksum = "d750af042f7ef4f724306de029d18836c26c1765a54a6a3f094cbd23a7267ffa"
 
 [[package]]
 name = "libredox"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4488594b9328dee448adb906d8b126d9b7deb7cf5c22161ee591610bb1be83c0"
-dependencies = [
- "bitflags 2.9.0",
- "libc",
- "redox_syscall 0.5.16",
-]
-
-[[package]]
-name = "libredox"
 version = "0.1.8"
-source = "git+https://gitlab.redox-os.org/Ibuki.O/libredox.git?branch=call#cfe341b6132328e9c4df5abdd7db67e8bf0b487f"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "360e552c93fa0e8152ab463bc4c4837fce76a225df11dfaeea66c313de5e61f7"
 dependencies = [
  "bitflags 2.9.0",
  "libc",
- "redox_syscall 0.5.16",
+ "redox_syscall",
 ]
 
 [[package]]
@@ -119,27 +109,19 @@ dependencies = [
 
 [[package]]
 name = "redox-scheme"
-version = "0.6.1"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a14f94bc95b388d8f40a61f25577863f1cf151aaf600a5b7778d1a2018ff7742"
+checksum = "2c00025a04f76fdcf72c15f10c7a12d9f2fdde93e539be9a57d5d632c4158a9e"
 dependencies = [
- "libredox 0.1.6",
- "redox_syscall 0.5.16",
-]
-
-[[package]]
-name = "redox_syscall"
-version = "0.5.16"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7251471db004e509f4e75a62cca9435365b5ec7bcdff530d612ac7c87c44a792"
-dependencies = [
- "bitflags 2.9.0",
+ "libredox",
+ "redox_syscall",
 ]
 
 [[package]]
 name = "redox_syscall"
 version = "0.5.17"
-source = "git+https://gitlab.redox-os.org/redox-os/syscall.git?branch=master#a9880ccf50d093e662f3b31c1aa13f0951cc2b4d"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5407465600fb0548f1442edf71dd20683c6ed326200ace4b1ef0763521bb3b77"
 dependencies = [
  "bitflags 2.9.0",
 ]
