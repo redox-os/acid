@@ -36,38 +36,45 @@ fn create_socket_pair() -> io::Result<(usize, usize)> {
     Ok((fds[0] as usize, fds[1] as usize))
 }
 
-fn send_fds(sender_sock: usize, fds_to_send: &[usize]) -> Result<()> {
+fn send_fds(sender_sock: usize, fds_to_send: &[usize]) -> Result<usize> {
     let mut payload: Vec<u8> = Vec::with_capacity(fds_to_send.len() * mem::size_of::<usize>());
     for &fd in fds_to_send {
         payload.extend_from_slice(&fd.to_ne_bytes());
     }
-    libredox::call::call_wo(sender_sock, &payload, CallFlags::FD, &[])?;
-    Ok(())
+    Ok(libredox::call::call_wo(
+        sender_sock,
+        &payload,
+        CallFlags::FD,
+        &[],
+    )?)
 }
 
-fn send_fds_with_clone(sender_sock: usize, fds_to_send: &[usize]) -> Result<()> {
+fn send_fds_with_clone(sender_sock: usize, fds_to_send: &[usize]) -> Result<usize> {
     let mut payload: Vec<u8> = Vec::with_capacity(fds_to_send.len() * mem::size_of::<usize>());
     for &fd in fds_to_send {
         payload.extend_from_slice(&fd.to_ne_bytes());
     }
-    libredox::call::call_wo(
+    Ok(libredox::call::call_wo(
         sender_sock,
         &payload,
         CallFlags::FD | CallFlags::FD_CLONE,
         &[],
-    )?;
-    Ok(())
+    )?)
 }
 
-fn receive_fds(receiver_sock: usize, dst_fds: &mut [usize], flags: CallFlags) -> Result<()> {
+fn receive_fds(receiver_sock: usize, dst_fds: &mut [usize], flags: CallFlags) -> Result<usize> {
     let dst_fds_bytes: &mut [u8] = unsafe {
         core::slice::from_raw_parts_mut(
             dst_fds.as_mut_ptr() as *mut u8,
             dst_fds.len() * mem::size_of::<usize>(),
         )
     };
-    libredox::call::call_ro(receiver_sock, dst_fds_bytes, CallFlags::FD | flags, &[])?;
-    Ok(())
+    Ok(libredox::call::call_ro(
+        receiver_sock,
+        dst_fds_bytes,
+        CallFlags::FD | flags,
+        &[],
+    )?)
 }
 
 fn test_send_moved_fd_fails_with_ebadf() -> anyhow::Result<()> {
