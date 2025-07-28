@@ -244,17 +244,20 @@ fn test_receive_buffer_too_small() -> anyhow::Result<()> {
     send_fds(sender, &[fd1, fd2, fd3])?;
 
     let mut small_buffer = [usize::MAX; 2];
-    println!("  -> Receiving with a buffer of size 2 (should fail with EMSGSIZE)");
-    let result = receive_fds(receiver, &mut small_buffer, CallFlags::empty());
+    println!("  -> Receiving with a buffer of size 2");
+    receive_fds(receiver, &mut small_buffer, CallFlags::empty())?;
+    println!("  -> Received FDs into slots: {:?}", small_buffer);
 
-    assert!(
-        result.is_err(),
-        "Expected an error for insufficient buffer but got Ok"
-    );
-    if let Err(e) = result {
-        println!("    -> Received expected error: {:?}", e);
-        assert_eq!(e.errno(), libredox::errno::EINVAL);
-    }
+    verify_fsync(small_buffer[0])?;
+    verify_fsync(small_buffer[1])?;
+
+    let mut remaining_fds = [usize::MAX; 1];
+    println!(" -> Receiving remaining FDs with a buffer of size 1");
+    receive_fds(receiver, &mut remaining_fds, CallFlags::empty())?;
+    println!("  -> Received remaining FD: {:?}", remaining_fds);
+
+    verify_fsync(remaining_fds[0])?;
+
     libredox::call::close(receiver)?;
     libredox::call::close(sender)?;
 
@@ -264,6 +267,7 @@ fn test_receive_buffer_too_small() -> anyhow::Result<()> {
 fn test_receive_buffer_too_large() -> anyhow::Result<()> {
     println!("\n[TEST] Behavior when receive buffer is larger than sent FDs");
     let (receiver, sender) = create_socket_pair()?;
+    unsafe { libc::fcntl(receiver as i32, libc::F_SETFL, libc::O_NONBLOCK) };
     let fd1 = prepare_fd_to_send("buf_large1")?;
     let fd2 = prepare_fd_to_send("buf_large2")?;
 
@@ -273,15 +277,23 @@ fn test_receive_buffer_too_large() -> anyhow::Result<()> {
     let mut large_buffer = [usize::MAX; 5];
     println!("  -> Receiving with a buffer of size 5");
 
-    let result = receive_fds(receiver, &mut large_buffer, CallFlags::empty());
+    receive_fds(receiver, &mut large_buffer, CallFlags::empty())?;
     assert!(
         result.is_err(),
         "Expected an error for larger buffer but got Ok"
     );
     if let Err(e) = result {
         println!("    -> Received expected error: {:?}", e);
-        assert_eq!(e.errno(), libredox::errno::EINVAL);
+        assert_eq!(e.errno(), libredox::errno::EWOULDBLOCK);
     }
+
+    let mut received_fds = [usize::MAX; 2];
+    println!("  -> Receiving with a buffer of size 2");
+    let bytes_received = receive_fds(receiver, &mut received_fds, CallFlags::empty())?;
+    println!("  -> Received FDs: {:?}", received_fds);
+
+    verify_fsync(received_fds[0])?;
+    verify_fsync(received_fds[1])?;
 
     libredox::call::close(receiver)?;
     libredox::call::close(sender)?;
