@@ -312,7 +312,7 @@ fn test_send_zero_fds() -> anyhow::Result<()> {
     unsafe { libc::fcntl(receiver as i32, libc::F_SETFL, libc::O_NONBLOCK) };
 
     let mut buffer = [0; 1];
-    println!("  -> Receiving with a non-blocking flag to check for empty message");
+    println!("  -> Receiving with a non-blocking flag to check for empty fds");
     let result = receive_fds(receiver, &mut buffer, CallFlags::empty());
 
     assert!(result.is_err(), "Expected an error for no data but got Ok");
@@ -327,7 +327,7 @@ fn test_send_zero_fds() -> anyhow::Result<()> {
 }
 
 pub fn run_all() -> anyhow::Result<()> {
-    println!("\n--- FdTbl Indirect Tests ---");
+    println!("\n--- FdTbl Tests ---");
 
     test_send_moved_fd_fails_with_ebadf()?;
     test_send_cloned_fd_remains_valid()?;
@@ -340,6 +340,6 @@ pub fn run_all() -> anyhow::Result<()> {
     test_receive_buffer_too_large()?;
     test_send_zero_fds()?;
 
-    println!("\n--- FdTbl Indirect Tests Passed Successfully ---");
+    println!("\n--- FdTbl Tests Passed Successfully ---");
     Ok(())
 }
