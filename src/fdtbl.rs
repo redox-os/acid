@@ -88,7 +88,7 @@ fn test_send_moved_fd_fails_with_ebadf() -> anyhow::Result<()> {
     assert!(result.is_err(), "Expected an error but got Ok");
     if let Err(e) = result {
         println!("    -> Received expected error: {:?}", e);
-        assert_eq!(e.errno, libredox::errno::EBADF);
+        assert_eq!(e.errno(), libredox::errno::EBADF);
     }
 
     let mut received_fd = [usize::MAX];
@@ -204,7 +204,7 @@ fn test_manual_alloc_invalid_slot_fails_with_emfile() -> anyhow::Result<()> {
     assert!(result.is_err(), "Expected an error but got Ok");
     if let Err(e) = result {
         println!("  -> Received expected error: {:?}", e);
-        assert_eq!(e.errno, libredox::errno::EMFILE);
+        assert_eq!(e.errno(), libredox::errno::EMFILE);
     }
 
     libredox::call::close(receiver)?;
@@ -231,7 +231,7 @@ fn test_manual_alloc_to_occupied_slot_fails_with_eexist() -> anyhow::Result<()> 
     assert!(result.is_err(), "Expected an error but got Ok");
     if let Err(e) = result {
         println!("  -> Received expected error: {:?}", e);
-        assert_eq!(e.errno, libredox::errno::EEXIST);
+        assert_eq!(e.errno(), libredox::errno::EEXIST);
     }
 
     libredox::call::close(receiver)?;
@@ -260,7 +260,7 @@ fn test_receive_buffer_too_small() -> anyhow::Result<()> {
     );
     if let Err(e) = result {
         println!("    -> Received expected error: {:?}", e);
-        assert_eq!(e.errno, libredox::errno::EINVAL);
+        assert_eq!(e.errno(), libredox::errno::EINVAL);
     }
     libredox::call::close(receiver)?;
     libredox::call::close(sender)?;
@@ -287,7 +287,7 @@ fn test_receive_buffer_too_large() -> anyhow::Result<()> {
     );
     if let Err(e) = result {
         println!("    -> Received expected error: {:?}", e);
-        assert_eq!(e.errno, libredox::errno::EINVAL);
+        assert_eq!(e.errno(), libredox::errno::EINVAL);
     }
 
     libredox::call::close(receiver)?;
@@ -311,7 +311,7 @@ fn test_send_zero_fds() -> anyhow::Result<()> {
     assert!(result.is_err(), "Expected an error for no data but got Ok");
     if let Err(e) = result {
         println!("  -> Received expected error: {:?}", e);
-        assert_eq!(e.errno, libredox::errno::EAGAIN);
+        assert_eq!(e.errno(), libredox::errno::EAGAIN);
     }
 
     libredox::call::close(receiver)?;
