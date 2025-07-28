@@ -5,7 +5,7 @@ use syscall::UPPER_FDTBL_TAG;
 
 fn prepare_fd_to_send(name: &str) -> Result<usize> {
     let fd = libredox::call::open(
-        format!("chan:{}", name).as_str(),
+        format!("/scheme/chan/{}", name).as_str(),
         libredox::flag::O_RDWR | libredox::flag::O_CREAT | libredox::flag::O_CLOEXEC,
         0,
     )?;
