@@ -309,6 +309,8 @@ fn test_send_zero_fds() -> anyhow::Result<()> {
     let bytes_sent = send_fds(sender, &[])?;
     assert_eq!(bytes_sent, 0, "Expected 0 bytes to be sent");
 
+    unsafe { libc::fcntl(receiver as i32, libc::F_SETFL, libc::O_NONBLOCK) };
+
     let mut buffer = [0; 1];
     println!("  -> Receiving with a non-blocking flag to check for empty message");
     let result = receive_fds(receiver, &mut buffer, CallFlags::empty());
@@ -316,7 +318,7 @@ fn test_send_zero_fds() -> anyhow::Result<()> {
     assert!(result.is_err(), "Expected an error for no data but got Ok");
     if let Err(e) = result {
         println!("  -> Received expected error: {:?}", e);
-        assert_eq!(e.errno(), libredox::errno::EAGAIN);
+        assert_eq!(e.errno(), libredox::errno::EWOULDBLOCK);
     }
 
     libredox::call::close(receiver)?;
