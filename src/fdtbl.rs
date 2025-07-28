@@ -94,7 +94,7 @@ fn test_send_moved_fd_fails_with_ebadf() -> anyhow::Result<()> {
         assert_eq!(e.errno, syscall::EBADF);
     }
 
-    let mut received_fd = [0];
+    let mut received_fd = [usize::MAX];
     receive_fds(receiver, &mut received_fd, CallFlags::empty())?;
     syscall::close(received_fd[0])?;
     syscall::close(receiver)?;
@@ -114,7 +114,7 @@ fn test_send_cloned_fd_remains_valid() -> anyhow::Result<()> {
     println!("  -> Verifying original FD {} is still valid", fd);
     verify_fpath(fd, "clone_and_verify")?;
 
-    let mut received_fd = [0];
+    let mut received_fd = [usize::MAX];
     receive_fds(receiver, &mut received_fd, CallFlags::empty())?;
     syscall::close(received_fd[0])?;
     syscall::close(fd)?;
@@ -132,7 +132,7 @@ fn test_auto_alloc_to_posix_table() -> anyhow::Result<()> {
 
     send_fds(sender, &[fd1, fd2])?;
 
-    let mut new_fds = [0; 2];
+    let mut new_fds = [usize::MAX; 2];
     receive_fds(receiver, &mut new_fds, CallFlags::empty())?;
     println!("  -> Received FDs: {:?}", new_fds);
 
@@ -253,7 +253,7 @@ fn test_receive_buffer_too_small() -> anyhow::Result<()> {
     println!("  -> Sending 3 FDs");
     send_fds(sender, &[fd1, fd2, fd3])?;
 
-    let mut small_buffer = [0; 2];
+    let mut small_buffer = [usize::MAX; 2];
     println!("  -> Receiving with a buffer of size 2 (should fail with EMSGSIZE)");
     let result = receive_fds(receiver, &mut small_buffer, CallFlags::empty());
 
