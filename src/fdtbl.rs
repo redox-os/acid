@@ -1,7 +1,7 @@
 use std::{io, mem};
 use syscall::Error as SyscallError;
 use syscall::UPPER_FDTBL_TAG;
-use syscall::{self, CallFlags};
+use syscall::{self, CallFlags, Result};
 
 fn from_syscall_error(error: SyscallError) -> io::Error {
     io::Error::from_raw_os_error(error.errno as i32)
