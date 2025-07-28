@@ -301,7 +301,7 @@ fn test_receive_buffer_too_large() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn test_send_zero_fds() -> anyhow::Result<()> {
+fn test_send_and_recv_zero_fds() -> anyhow::Result<()> {
     println!("\n[TEST] Sending and receiving zero FDs");
     let (receiver, sender) = create_socket_pair()?;
 
@@ -309,17 +309,10 @@ fn test_send_zero_fds() -> anyhow::Result<()> {
     let bytes_sent = send_fds(sender, &[])?;
     assert_eq!(bytes_sent, 0, "Expected 0 bytes to be sent");
 
-    unsafe { libc::fcntl(receiver as i32, libc::F_SETFL, libc::O_NONBLOCK) };
-
-    let mut buffer = [0; 1];
-    println!("  -> Receiving with a non-blocking flag to check for empty fds");
-    let result = receive_fds(receiver, &mut buffer, CallFlags::empty());
-
-    assert!(result.is_err(), "Expected an error for no data but got Ok");
-    if let Err(e) = result {
-        println!("  -> Received expected error: {:?}", e);
-        assert_eq!(e.errno(), libredox::errno::EWOULDBLOCK);
-    }
+    let mut buffer = [];
+    println!("  -> Receiving with a buffer of size 0");
+    receive_fds(receiver, &mut buffer, CallFlags::empty())?;
+    println!("  -> Received FDs: {:?}", buffer);
 
     libredox::call::close(receiver)?;
     libredox::call::close(sender)?;
@@ -338,7 +331,7 @@ pub fn run_all() -> anyhow::Result<()> {
     test_manual_alloc_to_occupied_slot_fails_with_eexist()?;
     test_receive_buffer_too_small()?;
     test_receive_buffer_too_large()?;
-    test_send_zero_fds()?;
+    test_send_and_recv_zero_fds()?;
 
     println!("\n--- FdTbl Tests Passed Successfully ---");
     Ok(())
