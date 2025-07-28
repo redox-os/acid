@@ -7,22 +7,10 @@ fn from_syscall_error(error: SyscallError) -> io::Error {
     io::Error::from_raw_os_error(error.errno as i32)
 }
 
-const RESOURCE_NAME: &str = "/scheme/uds_stream";
-
 fn prepare_fd_to_send(name: &str) -> io::Result<usize> {
     let fd = syscall::open(
-        RESOURCE_NAME,
+        format!("chan:{}", name).as_str(),
         syscall::O_RDWR | syscall::O_CREAT | syscall::O_CLOEXEC,
-    )
-    .map_err(from_syscall_error)?;
-
-    let mut name_str = name.to_string();
-    let payload = name_str.as_bytes();
-    libredox::call::call_wo(
-        fd,
-        payload,
-        CallFlags::empty(),
-        &[redox_rt::protocol::SocketCall::Bind as u64],
     )
     .map_err(from_syscall_error)?;
 
@@ -34,7 +22,7 @@ fn verify_fpath(fd: usize, expected_name: &str) -> io::Result<()> {
     let bytes_read = syscall::fpath(fd, &mut buffer).map_err(from_syscall_error)?;
     let path_str =
         std::str::from_utf8(&buffer[..bytes_read]).expect("fpath returned invalid UTF-8");
-    let expected_path = format!("{}/{}", RESOURCE_NAME, expected_name);
+    let expected_path = format!("chan:{}", expected_name);
     println!("      fpath({}) -> '{}'", fd, path_str);
     assert_eq!(path_str, expected_path, "Path verification failed");
     Ok(())
