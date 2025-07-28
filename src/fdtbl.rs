@@ -277,7 +277,7 @@ fn test_receive_buffer_too_large() -> anyhow::Result<()> {
     let mut large_buffer = [usize::MAX; 5];
     println!("  -> Receiving with a buffer of size 5");
 
-    receive_fds(receiver, &mut large_buffer, CallFlags::empty())?;
+    let result = receive_fds(receiver, &mut large_buffer, CallFlags::empty());
     assert!(
         result.is_err(),
         "Expected an error for larger buffer but got Ok"
@@ -289,7 +289,7 @@ fn test_receive_buffer_too_large() -> anyhow::Result<()> {
 
     let mut received_fds = [usize::MAX; 2];
     println!("  -> Receiving with a buffer of size 2");
-    let bytes_received = receive_fds(receiver, &mut received_fds, CallFlags::empty())?;
+    receive_fds(receiver, &mut received_fds, CallFlags::empty())?;
     println!("  -> Received FDs: {:?}", received_fds);
 
     verify_fsync(received_fds[0])?;
