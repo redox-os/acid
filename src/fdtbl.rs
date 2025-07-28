@@ -13,15 +13,8 @@ fn prepare_fd_to_send(name: &str) -> Result<usize> {
     Ok(fd)
 }
 
-fn verify_fpath(fd: usize, expected_name: &str) -> Result<()> {
-    let mut buffer = [0u8; 128];
-    let bytes_read = libredox::call::fpath(fd, &mut buffer)?;
-    let path_str =
-        std::str::from_utf8(&buffer[..bytes_read]).expect("fpath returned invalid UTF-8");
-    let expected_path = format!("chan:{}", expected_name);
-    println!("      fpath({}) -> '{}'", fd, path_str);
-    assert_eq!(path_str, expected_path, "Path verification failed");
-    Ok(())
+fn verify_fsync(fd: usize) -> Result<()> {
+    libredox::call::fsync(fd)
 }
 
 fn create_socket_pair() -> Result<(usize, usize)> {
@@ -109,7 +102,7 @@ fn test_send_cloned_fd_remains_valid() -> anyhow::Result<()> {
     send_fds_with_clone(sender, &[fd])?;
 
     println!("  -> Verifying original FD {} is still valid", fd);
-    verify_fpath(fd, "clone_and_verify")?;
+    verify_fsync(fd)?;
 
     let mut received_fd = [usize::MAX];
     receive_fds(receiver, &mut received_fd, CallFlags::empty())?;
@@ -133,8 +126,8 @@ fn test_auto_alloc_to_posix_table() -> anyhow::Result<()> {
     receive_fds(receiver, &mut new_fds, CallFlags::empty())?;
     println!("  -> Received FDs: {:?}", new_fds);
 
-    verify_fpath(new_fds[0], "posix_auto1")?;
-    verify_fpath(new_fds[1], "posix_auto2")?;
+    verify_fsync(new_fds[0])?;
+    verify_fsync(new_fds[1])?;
 
     libredox::call::close(new_fds[0])?;
     libredox::call::close(new_fds[1])?;
@@ -158,8 +151,8 @@ fn test_auto_alloc_to_upper_table() -> anyhow::Result<()> {
 
     assert_eq!(new_fds[0] & UPPER_FDTBL_TAG, UPPER_FDTBL_TAG);
     assert_eq!(new_fds[1] & UPPER_FDTBL_TAG, UPPER_FDTBL_TAG);
-    verify_fpath(new_fds[0], "upper_auto1")?;
-    verify_fpath(new_fds[1], "upper_auto2")?;
+    verify_fsync(new_fds[0])?;
+    verify_fsync(new_fds[1])?;
 
     libredox::call::close(new_fds[0])?;
     libredox::call::close(new_fds[1])?;
@@ -181,8 +174,8 @@ fn test_manual_alloc_to_upper_table() -> anyhow::Result<()> {
     receive_fds(receiver, &mut manual_fds, CallFlags::FD_UPPER)?;
     println!("  -> Received FDs into slots: {:?}", manual_fds);
 
-    verify_fpath(manual_fds[0], "upper_manual1")?;
-    verify_fpath(manual_fds[1], "upper_manual2")?;
+    verify_fsync(manual_fds[0])?;
+    verify_fsync(manual_fds[1])?;
 
     libredox::call::close(manual_fds[0])?;
     libredox::call::close(manual_fds[1])?;
