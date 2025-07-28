@@ -7,7 +7,7 @@ edition = "2021"
 [dependencies]
 libc = "0.2"
 spin = "0.9"
-redox_syscall = { git = "https://gitlab.redox-os.org/Ibuki.O/syscall.git", branch = "table-flags", features = ["std"] }
+redox_syscall = { git = "https://gitlab.redox-os.org/redox-os/syscall.git", branch = "master", features = ["std"] }
 redox-scheme = "0.6"
 anyhow = "1.0.81"
 nix = { version = "0.29.0", features = ["process", "signal"] }
@@ -19,6 +19,3 @@ libredox = { git = "https://gitlab.redox-os.org/Ibuki.O/libredox.git", branch = 
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86 = "0.47.0"
-
-[patch.crates-io]
-redox_syscall = { git = "https://gitlab.redox-os.org/Ibuki.O/syscall.git", branch = "table-flags", features = ["std"] }

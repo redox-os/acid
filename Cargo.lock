@@ -11,7 +11,7 @@ dependencies = [
  "libredox 0.1.8",
  "nix",
  "redox-scheme",
- "redox_syscall",
+ "redox_syscall 0.5.17",
  "signal-hook",
  "spin",
  "x86",
@@ -73,7 +73,7 @@ checksum = "4488594b9328dee448adb906d8b126d9b7deb7cf5c22161ee591610bb1be83c0"
 dependencies = [
  "bitflags 2.9.0",
  "libc",
- "redox_syscall",
+ "redox_syscall 0.5.16",
 ]
 
 [[package]]
@@ -83,7 +83,7 @@ source = "git+https://gitlab.redox-os.org/Ibuki.O/libredox.git?branch=call#cfe34
 dependencies = [
  "bitflags 2.9.0",
  "libc",
- "redox_syscall",
+ "redox_syscall 0.5.16",
 ]
 
 [[package]]
@@ -124,13 +124,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a14f94bc95b388d8f40a61f25577863f1cf151aaf600a5b7778d1a2018ff7742"
 dependencies = [
  "libredox 0.1.6",
- "redox_syscall",
+ "redox_syscall 0.5.16",
+]
+
+[[package]]
+name = "redox_syscall"
+version = "0.5.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7251471db004e509f4e75a62cca9435365b5ec7bcdff530d612ac7c87c44a792"
+dependencies = [
+ "bitflags 2.9.0",
 ]
 
 [[package]]
 name = "redox_syscall"
 version = "0.5.17"
-source = "git+https://gitlab.redox-os.org/Ibuki.O/syscall.git?branch=table-flags#d74cb455555be3f4acc0c90bd9638cb2670f999b"
+source = "git+https://gitlab.redox-os.org/redox-os/syscall.git?branch=master#a9880ccf50d093e662f3b31c1aa13f0951cc2b4d"
 dependencies = [
  "bitflags 2.9.0",
 ]
