@@ -52,6 +52,19 @@ fn send_fds_with_clone(sender_sock: usize, fds_to_send: &[usize]) -> Result<usiz
     )?)
 }
 
+fn send_fds_with_exclusive(sender_sock: usize, fds_to_send: &[usize]) -> Result<usize> {
+    let mut payload: Vec<u8> = Vec::with_capacity(fds_to_send.len() * mem::size_of::<usize>());
+    for &fd in fds_to_send {
+        payload.extend_from_slice(&fd.to_ne_bytes());
+    }
+    Ok(libredox::call::call_wo(
+        sender_sock,
+        &payload,
+        CallFlags::FD | CallFlags::FD_EXCLUSIVE,
+        &[],
+    )?)
+}
+
 fn receive_fds(receiver_sock: usize, dst_fds: &mut [usize], flags: CallFlags) -> Result<usize> {
     let dst_fds_bytes: &mut [u8] = unsafe {
         core::slice::from_raw_parts_mut(
@@ -233,6 +246,27 @@ fn test_manual_alloc_to_occupied_slot_fails_with_eexist() -> anyhow::Result<()> 
     Ok(())
 }
 
+fn test_send_fails_with_ebusy() -> anyhow::Result<()> {
+    println!("\n[TEST] Sending an fd fails with EBUSY");
+    let (receiver, sender) = create_socket_pair()?;
+
+    let failing_fd1 = prepare_fd_to_send("should_fail_ebusy1")?;
+    let failing_fd2 = prepare_fd_to_send("should_fail_ebusy2")?;
+    let duped_fd = libredox::call::dup(failing_f2, &[])?;
+    let result = send_fds_with_exclusive(sender, &[failing_fd1, failing_fd2]);
+    assert!(result.is_err(), "Expected an error but got Ok");
+    if let Err(e) = result {
+        println!("  -> Received expected error: {:?}", e);
+        assert_eq!(e.errno(), libredox::errno::EBUSY);
+    }
+
+    libredox::call::close(duped_fd)?;
+    libredox::call::close(receiver)?;
+    libredox::call::close(sender)?;
+
+    Ok(())
+}
+
 fn test_receive_buffer_too_small() -> anyhow::Result<()> {
     println!("\n[TEST] Behavior when receive buffer is smaller than sent FDs");
     let (receiver, sender) = create_socket_pair()?;
@@ -329,6 +363,7 @@ pub fn run_all() -> anyhow::Result<()> {
     test_manual_alloc_to_upper_table()?;
     test_manual_alloc_invalid_slot_fails_with_emfile()?;
     test_manual_alloc_to_occupied_slot_fails_with_eexist()?;
+    test_send_fails_with_ebusy()?;
     test_receive_buffer_too_small()?;
     test_receive_buffer_too_large()?;
     test_send_and_recv_zero_fds()?;
