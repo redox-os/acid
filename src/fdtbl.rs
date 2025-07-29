@@ -252,7 +252,7 @@ fn test_send_fails_with_ebusy() -> anyhow::Result<()> {
 
     let failing_fd1 = prepare_fd_to_send("should_fail_ebusy1")?;
     let failing_fd2 = prepare_fd_to_send("should_fail_ebusy2")?;
-    let duped_fd = libredox::call::dup(failing_f2, &[])?;
+    let duped_fd = libredox::call::dup(failing_fd2, &[])?;
     let result = send_fds_with_exclusive(sender, &[failing_fd1, failing_fd2]);
     assert!(result.is_err(), "Expected an error but got Ok");
     if let Err(e) = result {
