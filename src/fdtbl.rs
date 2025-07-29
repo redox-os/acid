@@ -19,7 +19,7 @@ fn verify_fsync(fd: usize) -> Result<()> {
 
 fn create_socket_pair() -> Result<(usize, usize)> {
     let mut fds = [-1, -1];
-    let result = unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_DGRAM, 0, fds.as_mut_ptr()) };
+    let result = unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, fds.as_mut_ptr()) };
     if result != 0 {
         return Err(libredox::error::Error::new(result));
     }
