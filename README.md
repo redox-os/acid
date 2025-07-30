@@ -60,6 +60,7 @@ The following tests are allowed:
 - `acid uds_stream` - Test the Unix Domain Socket stream protocol.
 - `acid uds_dgram_msghdr` - Test the sendmsg/recvmsg functionality over Unix Domain Sockets datagram protocol.
 - `acid uds_stream_msghdr` - Test the sendmsg/recvmsg functionality over Unix Domain Sockets stream protocol.
+- `acid fdtbl` - Test the bulk fd passing mechanism with the separated file tables.
 - `acid switch` - Test to measure the context switch time in nanoseconds (ns).
 
 ```
