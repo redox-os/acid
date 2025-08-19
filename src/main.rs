@@ -1127,6 +1127,7 @@ fn main() {
     tests.insert("redoxfs_range_bookkeeping", redoxfs_range_bookkeeping);
     //tests.insert("eintr", eintr::eintr); // TODO
     tests.insert("syscall_bench", syscall_bench::bench);
+    tests.insert("scheme_call_bench", syscall_bench::scheme_call_bench);
     tests.insert("filetable_leak", filetable_leak);
     #[cfg(target_os = "redox")]
     tests.insert("scheme_call", scheme_call::scheme_call);

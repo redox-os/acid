@@ -1,3 +1,6 @@
+use std::fs::File;
+use std::io::BufWriter;
+
 #[cfg(target_arch = "x86_64")]
 pub fn bench() -> anyhow::Result<()> {
     // TODO: Support deeper syscalls, like reading O_NONBLOCK from an empty pipe.
@@ -27,5 +30,41 @@ pub fn bench() -> anyhow::Result<()> {
 }
 #[cfg(not(target_arch = "x86_64"))]
 pub fn bench() -> anyhow::Result<()> {
+    Ok(())
+}
+
+pub fn scheme_call_bench() -> anyhow::Result<()> {
+    // getppid is not currently cached, but TODO this is perhaps not relibc-future-proof for
+    // benchmarking
+
+    const N: usize = 1024 * 1024;
+
+    let _distorters = (0..16)
+        .map(|_| {
+            std::thread::spawn(|| loop {
+                std::thread::yield_now();
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let mut times = vec![0_u64; N];
+
+    let mut old = unsafe { x86::time::rdtsc() };
+
+    for i in 0..N {
+        assert_ne!(unsafe { libc::getppid() }, -1);
+        let new = unsafe { x86::time::rdtsc() };
+        times[i] = new - old;
+        old = new;
+    }
+
+    let mut data = BufWriter::new(File::create("times.txt")?);
+
+    for time in times {
+        use std::io::Write;
+
+        writeln!(data, "{time}")?;
+    }
+
     Ok(())
 }
