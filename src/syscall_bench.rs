@@ -33,6 +33,7 @@ pub fn bench() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(target_arch = "x86_64")]
 pub fn scheme_call_bench() -> anyhow::Result<()> {
     // getppid is not currently cached, but TODO this is perhaps not relibc-future-proof for
     // benchmarking
@@ -66,5 +67,10 @@ pub fn scheme_call_bench() -> anyhow::Result<()> {
         writeln!(data, "{time}")?;
     }
 
+    Ok(())
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+pub fn scheme_call_bench() -> anyhow::Result<()> {
     Ok(())
 }
