@@ -914,8 +914,10 @@ pub fn sigkill_fail_code() -> Result<()> {
         }
         ForkResult::Parent { child } => {
             signal::kill(child, Signal::SIGKILL)?;
-            // FIXME: should be changed to WaitStatus::Signaled when impld properly
-            assert_eq!(wait::waitpid(child, None)?, WaitStatus::Exited(child, 1));
+            assert_eq!(
+                wait::waitpid(child, None)?,
+                WaitStatus::Signaled(child, Signal::SIGKILL, false)
+            );
         }
     }
     Ok(())
