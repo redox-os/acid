@@ -1157,6 +1157,8 @@ fn main() {
     tests.insert("pgrp_lifetime", proc::pgrp_lifetime);
     tests.insert("waitpid_eintr", proc::waitpid_eintr);
     tests.insert("raise_correct_sig_group", proc::raise_correct_sig_group);
+    tests.insert("sigkill_fail_code", proc::sigkill_fail_code);
+
     tests.insert("uds_dgram", uds::dgram_tests::run_all);
     tests.insert("uds_stream", uds::stream_tests::run_all);
     tests.insert("uds_dgram_msghdr", uds::dgram_msghdr_tests::run_all);

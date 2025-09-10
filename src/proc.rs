@@ -904,3 +904,19 @@ pub fn raise_correct_sig_group() -> Result<()> {
         std::process::exit(0);
     }
 }
+pub fn sigkill_fail_code() -> Result<()> {
+    let [mut read_fd, _write_fd] = crate::pipe();
+    match unsafe { unistd::fork().unwrap() } {
+        ForkResult::Child => {
+            // block forever
+            read_fd.read_exact(&mut [0_u8]).unwrap();
+            unreachable!();
+        }
+        ForkResult::Parent { child } => {
+            signal::kill(child, Signal::SIGKILL)?;
+            // FIXME: should be changed to WaitStatus::Signaled when impld properly
+            assert_eq!(wait::waitpid(child, None)?, WaitStatus::Exited(child, 1));
+        }
+    }
+    Ok(())
+}
