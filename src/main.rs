@@ -1,5 +1,5 @@
 //!Acid testing program
-#![feature(array_chunks, core_intrinsics, let_chains, thread_local)]
+#![feature(core_intrinsics, let_chains, thread_local)]
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
