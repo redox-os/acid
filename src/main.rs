@@ -59,6 +59,7 @@ fn main() {
     tests.insert("anonymous_map_shared", memory::anonymous_map_shared);
     //tests.insert("tlb", tlb_test); // TODO
     tests.insert("file_mmap", memory::file_mmap_test);
+    tests.insert("mmap_delay", memory::mmap_delay);
     #[cfg(target_arch = "x86_64")]
     tests.insert("redoxfs_range_bookkeeping", arch::redoxfs_range_bookkeeping);
     //tests.insert("eintr", eintr::eintr); // TODO

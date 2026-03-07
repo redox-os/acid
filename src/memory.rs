@@ -8,6 +8,7 @@ use std::{
         Barrier,
     },
     thread,
+    time::Instant,
 };
 
 use syscall::{Map, MapFlags, PAGE_SIZE};
@@ -218,6 +219,49 @@ pub fn file_mmap_test() {
     }
 
     std::fs::remove_file("acid_tmp_file").unwrap();
+}
+
+pub fn mmap_delay() {
+    // This needs to be a path to a large executable, cosmic-files is large and usually installed
+    let path = "/usr/bin/cosmic-files";
+
+    let file = OpenOptions::new().read(true).open(path).unwrap();
+
+    let metadata = file.metadata().unwrap();
+    println!(
+        "File: {} bytes (~{:.2} MB)\n",
+        metadata.len(),
+        metadata.len() as f64 / 1048576.0
+    );
+
+    let instant = Instant::now();
+
+    let ptr = unsafe {
+        syscall::fmap(
+            file.as_raw_fd() as usize,
+            &Map {
+                address: 0,
+                size: metadata.len() as usize,
+                flags: MapFlags::PROT_READ | MapFlags::MAP_PRIVATE,
+                offset: 0,
+            },
+        )
+        .unwrap()
+    };
+
+    let duration = instant.elapsed();
+    println!("Time to map: {:?}", duration);
+
+    let instant = Instant::now();
+
+    let first_byte = unsafe { *(ptr as *const u8) };
+
+    let duration = instant.elapsed();
+    println!("Time to first byte {:02X}: {:?}", first_byte, duration);
+
+    unsafe {
+        syscall::funmap(ptr, metadata.len() as usize).unwrap();
+    }
 }
 
 pub fn anonymous_map_shared() {
