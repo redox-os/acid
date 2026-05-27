@@ -68,6 +68,8 @@ fn main() {
     tests.insert("filetable_leak", memory::filetable_leak);
     #[cfg(any(test, target_os = "redox"))]
     tests.insert("scheme_call", scheme_call::scheme_call);
+    #[cfg(any(test, target_os = "redox"))]
+    tests.insert("scheme_relpathat", scheme_call::scheme_relpathat);
     tests.insert("fork_tree_bench", proc::fork_tree_bench::<false>);
     tests.insert("fork_serial_bench", proc::fork_serial_bench::<false>);
     tests.insert("fork_exec_serial_bench", proc::fork_serial_bench::<true>);

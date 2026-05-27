@@ -1,5 +1,5 @@
 use libredox::flag::{O_CLOEXEC, O_RDWR};
-use redox_scheme::scheme::{register_sync_scheme, SchemeSync};
+use redox_scheme::scheme::{register_sync_scheme, SchemeState, SchemeSync};
 use redox_scheme::wrappers::ReadinessBased;
 use redox_scheme::{CallerCtx, OpenResult, RequestKind, SignalBehavior, Socket};
 use std::cell::RefCell;
@@ -17,6 +17,9 @@ use crate::daemon::Daemon;
 // SCHEME CALL
 //
 struct SchemeTestCall {}
+impl SchemeTestCall {
+    const FILE_NAME: &'static str = "file";
+}
 impl SchemeSync for SchemeTestCall {
     fn scheme_root(&mut self) -> Result<usize> {
         Ok(0)
@@ -24,14 +27,15 @@ impl SchemeSync for SchemeTestCall {
     fn openat(
         &mut self,
         _fd: usize,
-        _path: &str,
+        path: &str,
         _flags: usize,
         _fcntl_flags: u32,
         _ctx: &CallerCtx,
     ) -> Result<OpenResult> {
-        println!("CALLED SYS_OPEN");
+        println!("CALLED SYS_OPEN, path {path}");
+        let number = if path == Self::FILE_NAME { 1 } else { 0 };
         Ok(OpenResult::ThisScheme {
-            number: 0,
+            number,
             flags: NewFdFlags::empty(),
         })
     }
@@ -46,12 +50,29 @@ impl SchemeSync for SchemeTestCall {
         payload[0] += metadata[0] as u8;
         Ok(1337)
     }
+
+    fn call_multiple_ids(
+        &mut self,
+        ids: &[usize],
+        payload: &mut [u8],
+        metadata: &[u64],
+        _ctx: &CallerCtx, // Only pid and id are correct here, uid/gid are not used
+    ) -> Result<usize> {
+        println!("CALLED SYS_CALL, ID {ids:?} payload {payload:?} metadata {metadata:?}");
+        if ids[0] == 0 && ids[1] == 1 {
+            payload[0] += metadata[0] as u8;
+            Ok(1337)
+        } else {
+            Err(Error::new(EINVAL))
+        }
+    }
 }
 
 pub fn scheme_call() {
     let _daemon = Daemon::new(move |daemon| {
         let sock = Socket::create().unwrap();
         let mut scheme = RefCell::new(SchemeTestCall {});
+        let mut state = RefCell::new(SchemeState::new());
         register_sync_scheme(&sock, "test-scheme", &mut *scheme.borrow_mut()).unwrap();
         daemon.ready().unwrap();
 
@@ -62,7 +83,7 @@ pub fn scheme_call() {
             let RequestKind::Call(req) = req.kind() else {
                 continue;
             };
-            let res = req.handle_sync(scheme.get_mut());
+            let res = req.handle_sync(scheme.get_mut(), state.get_mut());
             let _ = sock.write_response(res, SignalBehavior::Restart).unwrap();
         }
         std::process::exit(0);
@@ -87,6 +108,115 @@ pub fn scheme_call() {
     };
     assert_eq!(code, 1337);
     assert_eq!(data_buf[0], 10);
+
+    let root_fd = libredox::call::open("/scheme/test-scheme", 0, 0).unwrap();
+    let fds = [root_fd, fd];
+
+    let mut data_buf: [u8; 1] = [3];
+    let metadata_buf: [u64; 1] = [7];
+
+    let code = unsafe {
+        syscall::syscall6(
+            syscall::SYS_CALL,
+            fds.as_ptr() as usize,
+            data_buf.as_mut_ptr() as usize,
+            data_buf.len(),
+            metadata_buf.len() | syscall::CallFlags::MULTIPLE_FDS.bits(),
+            metadata_buf.as_ptr() as usize,
+            fds.len() * core::mem::size_of::<usize>(),
+        )
+        .unwrap()
+    };
+    assert_eq!(code, 1337);
+    assert_eq!(data_buf[0], 10);
+
+    let res = syscall::call_rw(&[][..], &mut [], syscall::CallFlags::empty(), &[]);
+    assert!(res.is_err());
+    let errno = res.err().unwrap().errno;
+    assert_eq!(errno, EINVAL);
+
+    let res = syscall::call_rw(&[0, 0, 0][..], &mut [], syscall::CallFlags::empty(), &[]);
+    assert!(res.is_err());
+    let errno = res.err().unwrap().errno;
+    assert_eq!(errno, EINVAL);
+}
+
+//
+// SCHEME RELPATHAT
+//
+struct SchemeTestRelpathat {}
+impl SchemeTestRelpathat {
+    const FILE_NAME: &'static str = "file";
+}
+impl SchemeSync for SchemeTestRelpathat {
+    fn scheme_root(&mut self) -> Result<usize> {
+        Ok(0)
+    }
+    fn openat(
+        &mut self,
+        _fd: usize,
+        path: &str,
+        _flags: usize,
+        _fcntl_flags: u32,
+        _ctx: &CallerCtx,
+    ) -> Result<OpenResult> {
+        println!("CALLED SYS_OPEN, path {path}");
+        let number = if path == Self::FILE_NAME { 1 } else { 0 };
+        Ok(OpenResult::ThisScheme {
+            number,
+            flags: NewFdFlags::empty(),
+        })
+    }
+    fn relpathat(
+        &mut self,
+        id: usize,
+        dir_id: usize,
+        path: &mut [u8],
+        _ctx: &CallerCtx, // Only pid and id are correct here, uid/gid are not used
+    ) -> Result<usize> {
+        println!("CALLED RELPATHAT, ID {id} at DIR_ID {dir_id} path {path:?}");
+        let bytes = Self::FILE_NAME.as_bytes();
+        let len = bytes.len();
+        path[..len].copy_from_slice(bytes);
+        Ok(len)
+    }
+}
+
+pub fn scheme_relpathat() {
+    let _daemon = Daemon::new(move |daemon| {
+        let sock = Socket::create().unwrap();
+        let mut scheme = RefCell::new(SchemeTestRelpathat {});
+        let mut state = RefCell::new(SchemeState::new());
+        register_sync_scheme(&sock, "test-scheme-relpathat", &mut *scheme.borrow_mut()).unwrap();
+        daemon.ready().unwrap();
+
+        loop {
+            let Some(req) = sock.next_request(SignalBehavior::Restart).unwrap() else {
+                break;
+            };
+            let RequestKind::Call(req) = req.kind() else {
+                continue;
+            };
+            let res = req.handle_sync(scheme.get_mut(), state.get_mut());
+            let _ = sock.write_response(res, SignalBehavior::Restart).unwrap();
+        }
+        std::process::exit(0);
+    })
+    .unwrap();
+
+    let fd = libredox::Fd::open("/scheme/test-scheme-relpathat/file", 0, 0).unwrap();
+    let dir_fd = libredox::Fd::open("/scheme/test-scheme-relpathat", 0, 0).unwrap();
+
+    let mut data_buf: [u8; 4] = [0; 4];
+
+    let len = libredox::call::relpathat(dir_fd.raw(), fd.raw(), &mut data_buf).unwrap();
+    assert_eq!(len, SchemeTestRelpathat::FILE_NAME.len());
+    assert_eq!(&data_buf[..], SchemeTestRelpathat::FILE_NAME.as_bytes());
+
+    let res = libredox::call::relpathat(fd.raw(), 0, &mut data_buf);
+    assert!(res.is_err());
+    let errno = res.err().unwrap().errno();
+    assert_eq!(errno, libredox::errno::EXDEV);
 }
 
 //
