@@ -2,12 +2,14 @@ use std::{os::unix::thread::JoinHandleExt, time::Duration};
 
 // Crate named sys_call to avoid confusion with redox_syscall
 
-pub fn invalid_syscall() {
+pub fn invalid_syscall<const P2ITER: u32>() {
+    let before = unsafe { x86::time::rdtscp() };
+
     // TODO: Support deeper syscalls, like reading O_NONBLOCK from an empty pipe.
     unsafe {
         core::arch::asm!("
             mov edx, 1337 // invalid syscall
-            mov edi, 1 << 10 // iteration count
+            mov edi, 1 << {P2ITER} // iteration count
 
             .p2align 6
 
@@ -18,8 +20,12 @@ pub fn invalid_syscall() {
             .endr
             dec edi
             jnz 2b
-        ", out("edx") _, out("edi") _, out("ecx") _, out("r11") _, out("eax") _);
+        ", out("edx") _, out("edi") _, out("ecx") _, out("r11") _, out("eax") _, P2ITER = const P2ITER);
     }
+    let total_ticks = unsafe { x86::time::rdtscp() } - before;
+    let total_iters = 15 << P2ITER;
+    let ticks_per_iter = (total_ticks as f64) / (total_iters as f64);
+    println!("Ticks per iteration: {ticks_per_iter}");
 }
 
 // TODO: Update with openat?
@@ -86,7 +92,7 @@ mod tests {
 
     #[test]
     fn test_invalid_syscall() {
-        invalid_syscall()
+        invalid_syscall::<10>()
     }
 
     // throwing SIGKILL
@@ -102,6 +108,6 @@ mod tests {
 
     #[bench]
     fn bench_invalid_syscall(b: &mut Bencher) {
-        b.iter(|| invalid_syscall())
+        b.iter(|| invalid_syscall::<10>())
     }
 }

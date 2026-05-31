@@ -72,6 +72,17 @@ pub fn fork_tree_bench<const EXEC: bool>() {
     }
     println!("TIME: {:?}", now.elapsed());
 }
+pub fn getppid_bench() {
+    const N: u64 = 1 << 20;
+
+    let before = unsafe { x86::time::rdtscp() };
+    for _ in 0..N {
+        let _ = unistd::getppid();
+    }
+    let after = unsafe { x86::time::rdtscp() };
+    let avg_ticks = (after - before) as f64 / N as f64;
+    println!("AVG {avg_ticks} ticks per iteration, {N} iterations");
+}
 
 pub fn reparenting() {
     // Check that all children of a process are reparented to init, regardless of session or proc

@@ -254,7 +254,7 @@ pub fn mmap_delay() {
 
     let instant = Instant::now();
 
-    let first_byte = unsafe { *(ptr as *const u8) };
+    let first_byte = unsafe { (ptr as *const u8).read_volatile() };
 
     let duration = instant.elapsed();
     println!("Time to first byte {:02X}: {:?}", first_byte, duration);

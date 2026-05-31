@@ -64,7 +64,7 @@ fn main() {
     tests.insert("redoxfs_range_bookkeeping", arch::redoxfs_range_bookkeeping);
     //tests.insert("eintr", eintr::eintr); // TODO
     #[cfg(target_arch = "x86_64")]
-    tests.insert("invalid_syscall", arch::invalid_syscall);
+    tests.insert("invalid_syscall", arch::invalid_syscall::<20>);
     tests.insert("filetable_leak", memory::filetable_leak);
     #[cfg(any(test, target_os = "redox"))]
     tests.insert("scheme_call", scheme_call::scheme_call);
@@ -74,6 +74,7 @@ fn main() {
     tests.insert("fork_serial_bench", proc::fork_serial_bench::<false>);
     tests.insert("fork_exec_serial_bench", proc::fork_serial_bench::<true>);
     tests.insert("fork_exec_tree_bench", proc::fork_tree_bench::<true>);
+    tests.insert("getppid_bench", proc::getppid_bench);
     tests.insert("stop_orphan_pgrp", proc::stop_orphan_pgrp);
     tests.insert("setpgid", proc::setpgid);
     tests.insert("setsid", proc::setsid);
