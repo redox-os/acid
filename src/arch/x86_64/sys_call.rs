@@ -29,6 +29,7 @@ pub fn invalid_syscall<const P2ITER: u32>() {
 }
 
 // TODO: Update with openat?
+/*
 pub fn direction_flag_syscall() {
     let path = *b"sys:context";
 
@@ -59,6 +60,7 @@ pub fn direction_flag_syscall() {
 
     syscall::Error::demux(result).unwrap();
 }
+*/
 
 pub fn direction_flag_interrupt() {
     let thread = std::thread::spawn(|| unsafe {

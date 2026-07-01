@@ -58,7 +58,7 @@ fn clone_grant_using_fmap_test_inner(lazy: bool) {
 
     let mem = libredox::call::open(
         "shm:clone_grant_using_fmap_test",
-        syscall::O_CLOEXEC as i32,
+        libredox::flag::O_CLOEXEC,
         0,
     )
     .unwrap();
@@ -285,7 +285,7 @@ pub fn anonymous_map_shared() {
 pub fn pipe_test() {
     let read_fd =
         libredox::call::open("pipe:", libredox::flag::O_RDONLY, 0).expect("failed to open pipe:");
-    let write_fd = syscall::dup(read_fd, b"write").expect("failed to obtain write pipe");
+    let write_fd = libredox::call::dup(read_fd, b"write").expect("failed to obtain write pipe");
 
     let barrier = Barrier::new(2);
 

@@ -483,8 +483,8 @@ pub fn cross_scheme_link() {
 
     let mut file3 = unsafe {
         let dup_handle = libredox::call::open("dup:", O_CLOEXEC, 0).unwrap();
-        let fd = syscall::dup(dup_handle, path.as_bytes()).unwrap();
-        let _ = syscall::close(dup_handle);
+        let fd = libredox::call::dup(dup_handle, path.as_bytes()).unwrap();
+        let _ = libredox::call::close(dup_handle);
         std::fs::File::from_raw_fd(fd as RawFd)
     };
     let mut buf1 = String::new();
