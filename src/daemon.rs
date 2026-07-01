@@ -1,8 +1,9 @@
 use std::convert::Infallible;
 
 use libc::c_int;
+use libredox::call::close;
 use redox_scheme::scheme::SchemeSync;
-use syscall::{close, read, write, Error, Result, EINTR, EIO, O_CLOEXEC, O_CREAT, O_RDWR};
+use syscall::{read, write, Error, Result, EINTR, EIO, O_CREAT, O_RDWR};
 
 #[must_use = "Daemon::ready must be called"]
 pub struct Daemon {
@@ -78,7 +79,7 @@ pub fn scheme(name: &str, scheme_name: &str, mut _scheme: impl SchemeSync) -> Re
 
         let socket = libredox::call::open(
             format!(":{}", scheme_name),
-            (O_CREAT | O_RDWR | O_CLOEXEC) as i32,
+            (O_CREAT | O_RDWR) as i32 | libredox::flag::O_CLOEXEC,
             0,
         )
         .unwrap_or_else(|error| error_handler(error.into()));
@@ -106,7 +107,7 @@ pub fn scheme(name: &str, scheme_name: &str, mut _scheme: impl SchemeSync) -> Re
                 }
             }
         }
-        let _ = syscall::close(socket);
+        let _ = libredox::call::close(socket);
 
         std::process::exit(0);
     })?;

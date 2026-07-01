@@ -1,7 +1,6 @@
-
+use libredox::flag::O_CREAT;
 use std::thread;
 use syscall::{Error, EINTR};
-use libredox::flag::O_CREAT;
 
 // TODO
 pub fn eintr() {
@@ -13,30 +12,34 @@ pub fn eintr() {
 
     let pid = syscall::getpid().unwrap();
 
-    extern "C" fn h(_: usize) {
-    }
-    let _ = syscall::sigaction(syscall::SIGUSR1, Some(&syscall::SigAction {
-        sa_handler: Some(h),
-        ..Default::default()
-    }), None);
+    extern "C" fn h(_: usize) {}
+    let _ = syscall::sigaction(
+        syscall::SIGUSR1,
+        Some(&syscall::SigAction {
+            sa_handler: Some(h),
+            ..Default::default()
+        }),
+        None,
+    );
 
     let handle = thread::spawn(move || {
         let _ = syscall::read(reader1, &mut [0]).unwrap();
         let _ = syscall::kill(pid, syscall::SIGUSR1).unwrap();
     });
 
-
     let listener = libredox::call::open("chan:acid", O_CREAT).unwrap();
     let _writer2 = libredox::call::open("chan:acid", 0).unwrap();
-    let reader2 = syscall::dup(listener, b"listen").unwrap();
+    let reader2 = libredox::call::dup(listener, b"listen").unwrap();
 
     let _ = syscall::write(writer1, &[0]);
 
-    assert_eq!(syscall::read(reader2, &mut [0]).unwrap_err(), Error::new(EINTR));
+    assert_eq!(
+        syscall::read(reader2, &mut [0]).unwrap_err(),
+        Error::new(EINTR)
+    );
 
     handle.join().unwrap();
 }
-
 
 // TODO: FIX openat_test
 /*
@@ -46,7 +49,7 @@ fn openat_test() -> Result<()> {
         let test_file = format!("{}/readonly_test", folder_path);
         std::fs::write(&test_file, b"readonly content")?;
 
-        let file_fd = syscall::openat(raw_fd as _, "readonly_test", O_RDONLY)?;
+        let file_fd = libredox::call::openat(raw_fd as _, "readonly_test", O_RDONLY)?;
         let mut file: File = unsafe { File::from_raw_fd(file_fd as RawFd) };
         let mut buffer = [0u8; 16];
         let read = file.read(&mut buffer)?;
@@ -57,14 +60,14 @@ fn openat_test() -> Result<()> {
         let write_result = file.write(b"test");
         assert!(write_result.is_err());
 
-        let _ = syscall::close(file_fd);
+        let _ = libredox::call::close(file_fd);
         std::fs::remove_file(&test_file)?;
 
         // Test O_WRONLY - write-only access
         let test_file = format!("{}/writeonly_test", folder_path);
         std::fs::write(&test_file, b"original content")?;
 
-        let file_fd = syscall::openat(raw_fd as _, "writeonly_test", syscall::O_WRONLY)?;
+        let file_fd = libredox::call::openat(raw_fd as _, "writeonly_test", syscall::O_WRONLY)?;
         let mut file: File = unsafe { File::from_raw_fd(file_fd as RawFd) };
 
         // Try to read from write-only file
@@ -75,7 +78,7 @@ fn openat_test() -> Result<()> {
         let write_result = file.write(b"new content");
         assert!(write_result.is_ok());
 
-        let _ = syscall::close(file_fd);
+        let _ = libredox::call::close(file_fd);
         std::fs::remove_file(&test_file)?;
 
         Ok(())
@@ -83,10 +86,10 @@ fn openat_test() -> Result<()> {
 
     fn test_creation_flags(raw_fd: c_int, folder_path: &str) -> Result<()> {
         // Test O_CREAT - create new file
-        let file_fd = syscall::openat(raw_fd as _, "new_file", O_CREAT | O_RDWR)?;
+        let file_fd = libredox::call::openat(raw_fd as _, "new_file", O_CREAT | O_RDWR)?;
         let mut file: File = unsafe { File::from_raw_fd(file_fd as RawFd) };
         file.write(b"new file content")?;
-        let _ = syscall::close(file_fd);
+        let _ = libredox::call::close(file_fd);
 
         // Verify file was created
         let content = std::fs::read(format!("{}/new_file", folder_path))?;
@@ -94,24 +97,24 @@ fn openat_test() -> Result<()> {
 
         // Test O_EXCL - exclusive creation
         let excl_result =
-            syscall::openat(raw_fd as _, "new_file", O_CREAT | syscall::O_EXCL | O_RDWR);
+            libredox::call::openat(raw_fd as _, "new_file", O_CREAT | syscall::O_EXCL | O_RDWR);
         assert!(excl_result.is_err());
 
         // Test O_TRUNC - truncate existing file
-        let file_fd = syscall::openat(raw_fd as _, "new_file", syscall::O_TRUNC | O_RDWR)?;
+        let file_fd = libredox::call::openat(raw_fd as _, "new_file", syscall::O_TRUNC | O_RDWR)?;
         let mut file: File = unsafe { File::from_raw_fd(file_fd as RawFd) };
         file.write(b"truncated content")?;
-        let _ = syscall::close(file_fd);
+        let _ = libredox::call::close(file_fd);
 
         // Verify file was truncated
         let content = std::fs::read(format!("{}/new_file", folder_path))?;
         assert_eq!(content, b"truncated content");
 
         // Test O_APPEND - append mode
-        let file_fd = syscall::openat(raw_fd as _, "new_file", syscall::O_APPEND | O_RDWR)?;
+        let file_fd = libredox::call::openat(raw_fd as _, "new_file", syscall::O_APPEND | O_RDWR)?;
         let mut file: File = unsafe { File::from_raw_fd(file_fd as RawFd) };
         file.write(b" appended")?;
-        let _ = syscall::close(file_fd);
+        let _ = libredox::call::close(file_fd);
 
         // Verify content was appended
         let content = std::fs::read(format!("{}/new_file", folder_path))?;
@@ -128,7 +131,7 @@ fn openat_test() -> Result<()> {
         std::fs::write(&test_file, b"test content")?;
 
         let file_fd = libredox::call::open(&test_file, O_RDONLY)?;
-        let notdir_result = syscall::openat(file_fd, "some_file", O_RDONLY)
+        let notdir_result = libredox::call::openat(file_fd, "some_file", O_RDONLY)
             .expect_err("Expected an error for not directory");
         assert_eq!(
             notdir_result.errno,
@@ -136,12 +139,12 @@ fn openat_test() -> Result<()> {
             "Expected ENOTDIR, got: {notdir_result}"
         );
 
-        let _ = syscall::close(file_fd);
+        let _ = libredox::call::close(file_fd);
         std::fs::remove_file(&test_file)?;
 
         // TODO: Test should emit ENAMETOOLONG, but gives EINVAL
         let long_name = "a".repeat(1000);
-        let toolong_result = syscall::openat(raw_fd as _, &long_name, O_CREAT | O_RDWR);
+        let toolong_result = libredox::call::openat(raw_fd as _, &long_name, O_CREAT | O_RDWR);
         assert!(toolong_result.is_err());
 
         Ok(())
@@ -160,7 +163,7 @@ fn openat_test() -> Result<()> {
             full_path
         };
 
-        let file_fd = syscall::openat(raw_fd as _, file_path, O_RDWR)?;
+        let file_fd = libredox::call::openat(raw_fd as _, file_path, O_RDWR)?;
         let mut file: File = unsafe { File::from_raw_fd(file_fd as RawFd) };
         let mut buffer: [u8; 24] = [0; 24];
         // Read the content back
@@ -169,7 +172,7 @@ fn openat_test() -> Result<()> {
         assert_eq!(&buffer[..content.len()], content);
 
         // Clean up
-        let _ = syscall::close(file_fd);
+        let _ = libredox::call::close(file_fd);
         std::fs::remove_file(&full_path)?;
 
         Ok(())
@@ -184,15 +187,15 @@ fn openat_test() -> Result<()> {
         let dir_fd = libredox::call::open(&orig_dir, O_DIRECTORY | O_RDONLY)?;
         std::fs::rename(&orig_dir, &new_dir)?;
 
-        let fd = syscall::openat(dir_fd, "file_after_rename", O_CREAT | O_RDWR)?;
+        let fd = libredox::call::openat(dir_fd, "file_after_rename", O_CREAT | O_RDWR)?;
         let mut file: File = unsafe { File::from_raw_fd(fd as RawFd) };
         file.write_all(b"hello after rename")?;
-        let _ = syscall::close(fd);
+        let _ = libredox::call::close(fd);
         let content = std::fs::read(format!("{}/file_after_rename", new_dir))?;
         assert_eq!(content, b"hello after rename");
         std::fs::remove_file(format!("{}/file_after_rename", new_dir))?;
 
-        let _ = syscall::close(dir_fd);
+        let _ = libredox::call::close(dir_fd);
         std::fs::remove_dir(&new_dir)?;
         Ok(())
     }
@@ -223,7 +226,7 @@ fn openat_test() -> Result<()> {
     );
 
     // Error case - non-existent file
-    let non_existent = syscall::openat(raw_fd as _, "non_existent", O_RDWR)
+    let non_existent = libredox::call::openat(raw_fd as _, "non_existent", O_RDWR)
         .expect_err("Expected an error for non-existent file");
     assert_eq!(
         non_existent.errno,
@@ -232,7 +235,7 @@ fn openat_test() -> Result<()> {
     );
 
     // Cleanup
-    let _ = syscall::close(raw_fd as _);
+    let _ = libredox::call::close(raw_fd as _);
     std::fs::remove_dir_all(&path)?;
 
     Ok(())

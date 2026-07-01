@@ -166,7 +166,7 @@ pub mod dgram_tests {
     pub fn test_socketpair_io() {
         println!("[DGRAM] --- Testing socket pair blocking I/O ---");
         let sock1 = create_socket();
-        let sock2 = syscall::dup(sock1 as usize, b"connect").unwrap() as i32;
+        let sock2 = libredox::call::dup(sock1 as usize, b"connect").unwrap() as i32;
 
         let thread = thread::spawn(move || {
             println!("[DGRAM Thread] Sleeping for 1 second...");
@@ -213,7 +213,7 @@ pub mod dgram_tests {
     pub fn test_epipe() {
         println!("[DGRAM] --- Testing EPIPE on write ---");
         let sock1 = create_socket();
-        let sock2 = syscall::dup(sock1 as usize, b"connect").unwrap();
+        let sock2 = libredox::call::dup(sock1 as usize, b"connect").unwrap();
 
         // Close one end of the pair
         unsafe { close(sock2 as i32) };
@@ -232,9 +232,9 @@ pub mod dgram_tests {
     pub fn test_nonblocking_io() {
         println!("[DGRAM] --- Testing non-blocking I/O ---");
         let sock1 = create_socket();
-        let sock2 = syscall::dup(sock1 as usize, b"connect").unwrap();
+        let sock2 = libredox::call::dup(sock1 as usize, b"connect").unwrap();
 
-        syscall::fcntl(sock2 as usize, syscall::F_SETFL, syscall::O_NONBLOCK).unwrap();
+        libredox::call::fcntl(sock2 as usize, syscall::F_SETFL, syscall::O_NONBLOCK).unwrap();
 
         println!("[DGRAM] Reading from empty non-blocking socket (expecting EAGAIN)...");
         let mut buffer = [0u8; 30];
@@ -250,7 +250,7 @@ pub mod dgram_tests {
     pub fn test_message_size_limits() {
         println!("[DGRAM] --- Testing EMSGSIZE ---");
         let sock1 = create_socket();
-        let sock2 = syscall::dup(sock1 as usize, b"connect").unwrap();
+        let sock2 = libredox::call::dup(sock1 as usize, b"connect").unwrap();
 
         let too_large_message = vec![0u8; 70000];
         let result = syscall::write(sock2 as usize, &too_large_message);
@@ -267,8 +267,8 @@ pub mod dgram_tests {
         println!("[DGRAM] --- Testing zero-byte write ---");
         let server_socket = create_socket();
 
-        let fd0 = syscall::dup(server_socket as usize, b"connect").unwrap();
-        let fd1 = syscall::dup(server_socket as usize, b"listen").unwrap();
+        let fd0 = libredox::call::dup(server_socket as usize, b"connect").unwrap();
+        let fd1 = libredox::call::dup(server_socket as usize, b"listen").unwrap();
 
         let thread = thread::spawn(move || {
             let res = syscall::write(fd1 as usize, b"").unwrap();
@@ -666,7 +666,7 @@ pub mod stream_tests {
         let server_socket = create_socket();
 
         println!("[STREAM Server] Setting listening socket to non-blocking...");
-        syscall::fcntl(
+        libredox::call::fcntl(
             server_socket as usize,
             syscall::F_SETFL,
             syscall::O_NONBLOCK,
@@ -674,22 +674,22 @@ pub mod stream_tests {
         .unwrap();
 
         println!("[STREAM Server] Calling accept (via dup) on non-blocking socket with no pending connections...");
-        let dup_res = syscall::dup(server_socket as usize, b"listen");
+        let dup_res = libredox::call::dup(server_socket as usize, b"listen");
 
         assert!(
             dup_res.is_err(),
             "dup with listen should fail when no connections are pending"
         );
         assert_eq!(
-            dup_res.err().unwrap().errno,
-            syscall::error::EWOULDBLOCK,
+            dup_res.err().unwrap().errno(),
+            libredox::errno::EWOULDBLOCK,
             "Error should be EWOULDBLOCK"
         );
         println!("[STREAM OK] accept correctly returned EWOULDBLOCK.");
 
-        let client_sock = syscall::dup(server_socket as usize, b"connect").unwrap();
+        let client_sock = libredox::call::dup(server_socket as usize, b"connect").unwrap();
 
-        syscall::fcntl(client_sock, syscall::F_SETFL, syscall::O_NONBLOCK).unwrap();
+        libredox::call::fcntl(client_sock, syscall::F_SETFL, syscall::O_NONBLOCK).unwrap();
 
         println!("[STREAM Client] Writing to a not-yet-accepted socket...");
         let write_res = syscall::write(client_sock as usize, b"should fail");
@@ -1271,8 +1271,11 @@ pub mod dgram_msghdr_tests {
 
         assert_eq!(received_fds.len(), 2);
         for fd in received_fds.iter() {
-            let flags = syscall::fcntl(*fd as usize, syscall::F_GETFD, 0).unwrap();
-            assert_eq!(flags & syscall::O_CLOEXEC, syscall::O_CLOEXEC)
+            let flags = libredox::call::fcntl(*fd as usize, syscall::F_GETFD, 0).unwrap();
+            assert_eq!(
+                flags & libredox::flag::O_CLOEXEC as usize,
+                libredox::flag::O_CLOEXEC as usize
+            )
         }
         println!(
             "[OK] Received 2 FDs: {:?}, which are valid and correctly set MSG_CMSG_CLOEXEC.",
@@ -1795,8 +1798,11 @@ pub mod stream_msghdr_tests {
 
         assert_eq!(received_fds.len(), 2);
         for fd in received_fds.iter() {
-            let flags = syscall::fcntl(*fd as usize, syscall::F_GETFD, 0).unwrap();
-            assert_eq!(flags & syscall::O_CLOEXEC, syscall::O_CLOEXEC)
+            let flags = libredox::call::fcntl(*fd as usize, syscall::F_GETFD, 0).unwrap();
+            assert_eq!(
+                flags & libredox::flag::O_CLOEXEC as usize,
+                libredox::flag::O_CLOEXEC as usize
+            )
         }
         handle.join().unwrap();
         unsafe { close(receiver_sock) };
