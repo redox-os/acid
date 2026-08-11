@@ -72,6 +72,7 @@ pub fn fork_tree_bench<const EXEC: bool>() {
     }
     println!("TIME: {:?}", now.elapsed());
 }
+#[cfg(target_arch = "x86_64")]
 pub fn getppid_bench() {
     const N: u64 = 1 << 20;
 

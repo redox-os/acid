@@ -74,6 +74,7 @@ fn main() {
     tests.insert("fork_serial_bench", proc::fork_serial_bench::<false>);
     tests.insert("fork_exec_serial_bench", proc::fork_serial_bench::<true>);
     tests.insert("fork_exec_tree_bench", proc::fork_tree_bench::<true>);
+    #[cfg(target_arch = "x86_64")]
     tests.insert("getppid_bench", proc::getppid_bench);
     tests.insert("stop_orphan_pgrp", proc::stop_orphan_pgrp);
     tests.insert("setpgid", proc::setpgid);
