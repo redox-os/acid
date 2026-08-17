@@ -73,7 +73,7 @@ pub fn fork_tree_bench<const EXEC: bool>() {
     println!("TIME: {:?}", now.elapsed());
 }
 #[cfg(target_arch = "x86_64")]
-pub fn getppid_bench() {
+pub fn getppid_bench(results: &mut crate::BenchResults) {
     const N: u64 = 1 << 20;
 
     let before = unsafe { x86::time::rdtscp() };
@@ -83,6 +83,7 @@ pub fn getppid_bench() {
     let after = unsafe { x86::time::rdtscp() };
     let avg_ticks = (after - before) as f64 / N as f64;
     println!("AVG {avg_ticks} ticks per iteration, {N} iterations");
+    results.add_metric("getppid_bench.ticks_per_ipc", avg_ticks);
 }
 
 pub fn reparenting() {
