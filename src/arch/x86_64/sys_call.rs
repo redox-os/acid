@@ -2,7 +2,9 @@ use std::{os::unix::thread::JoinHandleExt, time::Duration};
 
 // Crate named sys_call to avoid confusion with redox_syscall
 
-pub fn invalid_syscall<const P2ITER: u32>() {
+/// Test (checking that it's harmless) or more importantly a benchmark, checking the shortest
+/// achievable lower bound on syscall latency.
+pub fn invalid_syscall<const P2ITER: u32>(results: &mut crate::BenchResults) {
     let before = unsafe { x86::time::rdtscp() };
 
     // TODO: Support deeper syscalls, like reading O_NONBLOCK from an empty pipe.
@@ -26,6 +28,7 @@ pub fn invalid_syscall<const P2ITER: u32>() {
     let total_iters = 15 << P2ITER;
     let ticks_per_iter = (total_ticks as f64) / (total_iters as f64);
     println!("Ticks per iteration: {ticks_per_iter}");
+    results.add_metric("invalid_syscall.ticks_per_syscall", ticks_per_iter);
 }
 
 // TODO: Update with openat?
@@ -92,11 +95,6 @@ mod tests {
     use super::*;
     use test::Bencher;
 
-    #[test]
-    fn test_invalid_syscall() {
-        invalid_syscall::<10>()
-    }
-
     // throwing SIGKILL
     // #[test]
     // fn test_direction_flag_syscall() {
@@ -107,9 +105,4 @@ mod tests {
     // fn test_direction_flag_interrupt() {
     //     direction_flag_interrupt()
     // }
-
-    #[bench]
-    fn bench_invalid_syscall(b: &mut Bencher) {
-        b.iter(|| invalid_syscall::<10>())
-    }
 }
