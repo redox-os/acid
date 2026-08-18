@@ -536,3 +536,46 @@ pub fn filetable_leak() {
         );
     }
 }
+
+/// Physical pages are mapped on-demand on Redox. This benchmark checks the average overhead of
+/// this, thus getting coverage of the interrupt entry point, frame allocator, and partly the
+/// virtual memory subsystem in the kernel.
+pub fn pgtbl_populate_bench(results: &mut crate::BenchResults) {
+    // TODO: shouldn't hardcode length and should be page size-independent
+    const LENGTH: usize = 1024 * 1024 * 1024; // 256k 4k-pages, 1 GiB
+    const PAGE_SIZE: usize = 4096;
+    const REPETITIONS: usize = 10;
+
+    let mut ticks = 0;
+
+    // TODO: mmap overhead may worsen the metrics for this test.
+    // TODO: rdtsc or rdtscp?
+
+    for _ in 0..REPETITIONS {
+        ticks += unsafe {
+            let base = libredox::call::mmap(libredox::call::MmapArgs {
+                addr: core::ptr::null_mut(),
+                length: LENGTH,
+                prot: libredox::flag::PROT_WRITE | libredox::flag::PROT_READ,
+                flags: libredox::flag::MAP_PRIVATE,
+                fd: !0,
+                offset: 0,
+            })
+            .unwrap()
+            .cast::<u8>();
+
+            let before = results.rdtsc();
+            for i in 0..LENGTH / PAGE_SIZE {
+                // will force the page to be mapped
+                base.add(i * PAGE_SIZE).write_volatile(0x42);
+            }
+            let elapsed = results.rdtsc() - before;
+            libredox::call::munmap(base.cast(), LENGTH).unwrap();
+            elapsed
+        };
+    }
+    results.add_metric(
+        "pgtbl_populate_bench.ticks_per_page",
+        (ticks as f64 / (LENGTH / PAGE_SIZE) as f64) / REPETITIONS as f64,
+    );
+}
