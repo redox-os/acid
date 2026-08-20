@@ -30,18 +30,16 @@ impl BenchResults {
     /// Read timestamp counter, non-serializing
     pub fn rdtsc(&mut self) -> u64 {
         // TODO: better fallback
-        if cfg!(not(target_arch = "x86_64")) {
-            return self.start.elapsed().as_nanos() as u64;
-        }
+        #[cfg(not(target_arch = "x86_64"))]
+        return self.start.elapsed().as_nanos() as u64;
         #[cfg(target_arch = "x86_64")]
         return unsafe { x86::time::rdtsc() };
     }
     /// Read timestamp counter, serializing
     pub fn rdtscp(&mut self) -> u64 {
         // TODO: better fallback
-        if cfg!(not(target_arch = "x86_64")) {
-            return self.start.elapsed().as_nanos() as u64;
-        }
+        #[cfg(not(target_arch = "x86_64"))]
+        return self.start.elapsed().as_nanos() as u64;
         #[cfg(target_arch = "x86_64")]
         return unsafe { x86::time::rdtscp() };
     }
