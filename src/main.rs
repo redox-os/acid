@@ -165,14 +165,48 @@ fn main() {
         } else if let Some(bench) = benches.get(name) {
             ran_bench = true;
 
-            let time = Instant::now();
-            bench(&mut bench_results);
-            let elapsed = time.elapsed();
-            bench_results.add_metric(
-                format!("{name}.total_time_ms"),
-                elapsed.as_secs_f64() * 1000.0,
-            );
-            println!("acid: took {}ms", elapsed.as_millis());
+            let repetitions = std::env::var("ACID_BENCH_REPETITIONS").map_or(1, |r| r.parse::<usize>().expect("malformed repetition count"));
+
+            let first_start = Instant::now();
+
+            // metric -> Vec of values
+            let mut all_metrics = HashMap::<String, Vec<f64>>::new();
+
+            for i in 0..repetitions {
+                println!("Running benchmark {i}/{repetitions}");
+                let mut sub_bench_results = BenchResults {
+                    metrics: Default::default(),
+                    start: Instant::now(),
+                };
+                bench(&mut sub_bench_results);
+                let elapsed = sub_bench_results.start.elapsed();
+                sub_bench_results.add_metric(
+                    format!("{name}.total_time_ms"),
+                    elapsed.as_secs_f64() * 1000.0,
+                );
+                for (metric, value) in sub_bench_results.metrics {
+                    all_metrics.entry(metric).or_default().push(value);
+                }
+            }
+
+            for (metric, values) in all_metrics {
+                let n = values.len() as f64;
+                let mean = values.iter().sum::<f64>() / n;
+                let variance = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n;
+                let stdev = variance.sqrt();
+
+                if let &[value] = &*values {
+                    bench_results.metrics.insert(metric, value);
+                } else {
+                    for (i, value) in values.iter().enumerate() {
+                        bench_results.metrics.insert(format!("{metric}_sample_{i}"), *value);
+                    }
+                    bench_results.metrics.insert(format!("{metric}_mean"), mean);
+                    bench_results.metrics.insert(format!("{metric}_stdev"), stdev);
+                }
+            }
+
+            println!("acid: took {}ms in total", first_start.elapsed().as_millis());
         } else {
             println!("acid: {}: not found", arg);
             process::exit(1);
