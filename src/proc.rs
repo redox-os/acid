@@ -76,11 +76,11 @@ pub fn fork_tree_bench<const EXEC: bool>() {
 pub fn getppid_bench(results: &mut crate::BenchResults) {
     const N: u64 = 1 << 20;
 
-    let before = unsafe { x86::time::rdtscp() };
+    let before = results.rdtscp();
     for _ in 0..N {
         let _ = unistd::getppid();
     }
-    let after = unsafe { x86::time::rdtscp() };
+    let after = results.rdtscp();
     let avg_ticks = (after - before) as f64 / N as f64;
     println!("AVG {avg_ticks} ticks per iteration, {N} iterations");
     results.add_metric("getppid_bench.ticks_per_ipc", avg_ticks);
