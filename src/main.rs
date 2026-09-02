@@ -7,6 +7,8 @@ use std::io::Write;
 use std::time::Instant;
 use std::{env, process};
 
+use self::arch::PerfCtrState;
+
 #[cfg(any(test, target_os = "redox"))]
 mod daemon;
 #[cfg(any(test, target_os = "redox"))]
@@ -19,11 +21,12 @@ mod proc;
 mod thread;
 mod uds;
 
-pub struct BenchResults {
+pub struct BenchResults<'perf> {
     metrics: BTreeMap<String, f64>,
+    perf_ctrs: Option<&'perf PerfCtrState>,
     start: std::time::Instant,
 }
-impl BenchResults {
+impl BenchResults<'_> {
     pub fn add_metric(&mut self, name: impl Into<String>, metric: f64) {
         self.metrics.insert(name.into(), metric);
     }
@@ -141,13 +144,15 @@ fn main() {
         benches.insert("invalid_syscall", arch::invalid_syscall::<20>);
         benches.insert("getppid_bench", proc::getppid_bench);
         benches.insert("pgtbl_populate_bench", memory::pgtbl_populate_bench);
+        benches.insert("perf_ctr_meta_test", arch::perf_ctr_meta_test);
     }
 
-    // TODO: allow specifying the number of times to repeat a benchmark, in order to get mean/stdev
-    // statistics
+    let perf_ctr_state = PerfCtrState::new();
+
     let mut bench_results = BenchResults {
         metrics: Default::default(),
         start: Instant::now(),
+        perf_ctrs: perf_ctr_state.as_ref(),
     };
 
     let mut ran_test = false;
@@ -165,7 +170,9 @@ fn main() {
         } else if let Some(bench) = benches.get(name) {
             ran_bench = true;
 
-            let repetitions = std::env::var("ACID_BENCH_REPETITIONS").map_or(1, |r| r.parse::<usize>().expect("malformed repetition count"));
+            let repetitions = std::env::var("ACID_BENCH_REPETITIONS").map_or(1, |r| {
+                r.parse::<usize>().expect("malformed repetition count")
+            });
 
             let first_start = Instant::now();
 
@@ -177,6 +184,9 @@ fn main() {
                 let mut sub_bench_results = BenchResults {
                     metrics: Default::default(),
                     start: Instant::now(),
+                    // Reuse perf counter state across benchmarks, but individual counters are
+                    // reset on RAII drops.
+                    perf_ctrs: perf_ctr_state.as_ref(),
                 };
                 bench(&mut sub_bench_results);
                 let elapsed = sub_bench_results.start.elapsed();
@@ -199,14 +209,21 @@ fn main() {
                     bench_results.metrics.insert(metric, value);
                 } else {
                     for (i, value) in values.iter().enumerate() {
-                        bench_results.metrics.insert(format!("{metric}_sample_{i}"), *value);
+                        bench_results
+                            .metrics
+                            .insert(format!("{metric}_sample_{i}"), *value);
                     }
                     bench_results.metrics.insert(format!("{metric}_mean"), mean);
-                    bench_results.metrics.insert(format!("{metric}_stdev"), stdev);
+                    bench_results
+                        .metrics
+                        .insert(format!("{metric}_stdev"), stdev);
                 }
             }
 
-            println!("acid: took {}ms in total", first_start.elapsed().as_millis());
+            println!(
+                "acid: took {}ms in total",
+                first_start.elapsed().as_millis()
+            );
         } else {
             println!("acid: {}: not found", arg);
             process::exit(1);
