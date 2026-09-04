@@ -14,6 +14,7 @@ mod scheme_call;
 
 mod arch;
 mod fdtbl;
+mod ipc;
 mod memory;
 mod proc;
 mod thread;
@@ -140,6 +141,7 @@ fn main() {
     {
         benches.insert("invalid_syscall", arch::invalid_syscall::<20>);
         benches.insert("getppid_bench", proc::getppid_bench);
+        benches.insert("ipc_latency", ipc::ipc_latency_bench);
         benches.insert("pgtbl_populate_bench", memory::pgtbl_populate_bench);
     }
 
@@ -165,7 +167,9 @@ fn main() {
         } else if let Some(bench) = benches.get(name) {
             ran_bench = true;
 
-            let repetitions = std::env::var("ACID_BENCH_REPETITIONS").map_or(1, |r| r.parse::<usize>().expect("malformed repetition count"));
+            let repetitions = std::env::var("ACID_BENCH_REPETITIONS").map_or(1, |r| {
+                r.parse::<usize>().expect("malformed repetition count")
+            });
 
             let first_start = Instant::now();
 
@@ -199,14 +203,21 @@ fn main() {
                     bench_results.metrics.insert(metric, value);
                 } else {
                     for (i, value) in values.iter().enumerate() {
-                        bench_results.metrics.insert(format!("{metric}_sample_{i}"), *value);
+                        bench_results
+                            .metrics
+                            .insert(format!("{metric}_sample_{i}"), *value);
                     }
                     bench_results.metrics.insert(format!("{metric}_mean"), mean);
-                    bench_results.metrics.insert(format!("{metric}_stdev"), stdev);
+                    bench_results
+                        .metrics
+                        .insert(format!("{metric}_stdev"), stdev);
                 }
             }
 
-            println!("acid: took {}ms in total", first_start.elapsed().as_millis());
+            println!(
+                "acid: took {}ms in total",
+                first_start.elapsed().as_millis()
+            );
         } else {
             println!("acid: {}: not found", arg);
             process::exit(1);
