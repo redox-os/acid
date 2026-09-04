@@ -16,6 +16,7 @@ mod scheme_call;
 
 mod arch;
 mod fdtbl;
+mod ipc;
 mod memory;
 mod proc;
 mod thread;
@@ -143,6 +144,7 @@ fn main() {
     {
         benches.insert("invalid_syscall", arch::invalid_syscall::<20>);
         benches.insert("getppid_bench", proc::getppid_bench);
+        benches.insert("ipc_latency", ipc::ipc_latency_bench);
         benches.insert("pgtbl_populate_bench", memory::pgtbl_populate_bench);
         benches.insert("perf_ctr_meta_test", arch::perf_ctr_meta_test);
     }
