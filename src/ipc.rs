@@ -7,7 +7,7 @@ use syscall::{CallFlags, EOPNOTSUPP};
 use crate::BenchResults;
 
 /// Similar to `getppid_bench`, except trying to be even more lightweight (such avoiding event queues).
-pub fn ipc_latency_bench(results: &mut BenchResults) {
+pub fn ipc_latency_bench<const USE_SIMULTANEOUS: bool>(results: &mut BenchResults) {
     let scheme = redox_scheme::Socket::create().unwrap();
     let fd = {
         let offset = 0;
@@ -36,48 +36,63 @@ pub fn ipc_latency_bench(results: &mut BenchResults) {
                 .unwrap();
             std::process::exit(0);
         }
-        ForkResult::Parent { child } => loop {
-            let Some(req) = scheme.next_request(SignalBehavior::Restart).unwrap() else {
-                break;
-            };
-            let RequestKind::Call(req) = req.kind() else {
-                continue;
-            };
-            let mut c = match req.op() {
-                Ok(Op::Call(c)) => c,
-                Ok(op) => {
-                    if !scheme
-                        .write_response(Response::err(EOPNOTSUPP, op), SignalBehavior::Restart)
+        ForkResult::Parent { child } => {
+            let mut res_to_write = None;
+
+            loop {
+                let req = match (res_to_write.take(), USE_SIMULTANEOUS) {
+                    (Some(response), true) => match scheme
+                        .write_response_and_await_next_request(SignalBehavior::Restart, response)
                         .unwrap()
                     {
-                        break;
-                    };
+                        (true, Some(req)) => req,
+                        (false, _) | (true, None) => break,
+                    },
+                    (Some(response), false) => {
+                        if !scheme
+                            .write_response(response, SignalBehavior::Restart)
+                            .unwrap()
+                        {
+                            break;
+                        };
+                        let Some(req) = scheme.next_request(SignalBehavior::Restart).unwrap()
+                        else {
+                            break;
+                        };
+                        req
+                    }
+                    (None, _) => {
+                        let Some(req) = scheme.next_request(SignalBehavior::Restart).unwrap()
+                        else {
+                            break;
+                        };
+                        req
+                    }
+                };
+                let RequestKind::Call(req) = req.kind() else {
                     continue;
+                };
+                let (response, payload) = match req.op() {
+                    Ok(Op::Call(mut c)) => {
+                        let payload = <[u8; size_of::<f64>()]>::try_from(c.payload())
+                            .ok()
+                            .map(f64::from_ne_bytes);
+                        (Response::ok(0, c), payload)
+                    }
+                    Ok(op) => (Response::err(EOPNOTSUPP, op), None),
+                    Err(req) => (Response::err(EOPNOTSUPP, req), None),
+                };
+                if let Some(ticks_per_ipc) = payload {
+                    results.add_metric("ipc_latency.ticks_per_ipc", ticks_per_ipc);
+                    let _ = scheme
+                        .write_response(response, SignalBehavior::Restart)
+                        .unwrap();
+                    nix::sys::wait::waitpid(child, None).unwrap();
+                    break;
+                } else {
+                    res_to_write = Some(response);
                 }
-                Err(req) => {
-                    if !scheme
-                        .write_response(Response::err(EOPNOTSUPP, req), SignalBehavior::Restart)
-                        .unwrap()
-                    {
-                        break;
-                    };
-                    continue;
-                }
-            };
-            let payload = <[u8; size_of::<f64>()]>::try_from(c.payload())
-                .ok()
-                .map(f64::from_ne_bytes);
-            if !scheme
-                .write_response(Response::ok(0, c), SignalBehavior::Restart)
-                .unwrap()
-            {
-                break;
             }
-            if let Some(ticks_per_ipc) = payload {
-                results.add_metric("ipc_latency.ticks_per_ipc", ticks_per_ipc);
-                nix::sys::wait::waitpid(child, None).unwrap();
-                break;
-            }
-        },
+        }
     }
 }
