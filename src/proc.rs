@@ -918,6 +918,120 @@ pub fn sigkill_fail_code() {
     }
 }
 
+#[cfg(not(target_arch = "x86_64"))]
+pub fn rtsig_avx_preservation() {
+    println!("skipped!");
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx")]
+pub fn rtsig_avx_preservation() {
+    // TODO: this shouldn't be done, but Redox's libc crate is limited...
+    const ARB_RTSIG: libc::c_int = 40;
+
+    unsafe {
+        // TODO: ucontext_t
+        unsafe fn empty_action(_: libc::c_int, _: *const libc::siginfo_t, _: *const ()) {}
+        let act = libc::sigaction {
+            sa_flags: libc::SA_SIGINFO,
+            sa_restorer: None,
+            sa_mask: core::mem::zeroed(),
+            sa_sigaction: empty_action as *const () as usize,
+        };
+        assert_eq!(libc::sigaction(ARB_RTSIG, &act, core::ptr::null_mut()), 0);
+    }
+
+    match unsafe { unistd::fork().unwrap() } {
+        ForkResult::Child => {
+            const NUM_REPETITIONS: usize = 1 << 28;
+            unsafe {
+                use std::arch::x86_64::{__m256i, _mm256_set1_epi8};
+
+                let ymmregs_before: [__m256i; 16] =
+                    core::array::from_fn(|i| _mm256_set1_epi8((i * 16 + i) as i8));
+                let mut ymmregs_after: [__m256i; 16] = unsafe { core::mem::zeroed() };
+
+                core::arch::asm!("
+                    vmovdqa ymm0,  [{before}+0x000]
+                    vmovdqa ymm1,  [{before}+0x020]
+                    vmovdqa ymm2,  [{before}+0x040]
+                    vmovdqa ymm3,  [{before}+0x060]
+                    vmovdqa ymm4,  [{before}+0x080]
+                    vmovdqa ymm5,  [{before}+0x0A0]
+                    vmovdqa ymm6,  [{before}+0x0C0]
+                    vmovdqa ymm7,  [{before}+0x0E0]
+                    vmovdqa ymm8,  [{before}+0x100]
+                    vmovdqa ymm9,  [{before}+0x120]
+                    vmovdqa ymm10, [{before}+0x140]
+                    vmovdqa ymm11, [{before}+0x160]
+                    vmovdqa ymm12, [{before}+0x180]
+                    vmovdqa ymm13, [{before}+0x1A0]
+                    vmovdqa ymm14, [{before}+0x1C0]
+                    vmovdqa ymm15, [{before}+0x1E0]
+
+                    mov rax, {num_repetitions}
+                    .p2align 4
+2:
+                    pause
+                    sub rax, 1
+                    jnz 2b
+
+                    vmovdqa [{after}+0x000], ymm0  
+                    vmovdqa [{after}+0x020], ymm1  
+                    vmovdqa [{after}+0x040], ymm2  
+                    vmovdqa [{after}+0x060], ymm3  
+                    vmovdqa [{after}+0x080], ymm4  
+                    vmovdqa [{after}+0x0A0], ymm5  
+                    vmovdqa [{after}+0x0C0], ymm6  
+                    vmovdqa [{after}+0x0E0], ymm7  
+                    vmovdqa [{after}+0x100], ymm8  
+                    vmovdqa [{after}+0x120], ymm9  
+                    vmovdqa [{after}+0x140], ymm10 
+                    vmovdqa [{after}+0x160], ymm11 
+                    vmovdqa [{after}+0x180], ymm12 
+                    vmovdqa [{after}+0x1A0], ymm13 
+                    vmovdqa [{after}+0x1C0], ymm14 
+                    vmovdqa [{after}+0x1E0], ymm15 
+                ",
+                    num_repetitions = const(NUM_REPETITIONS),
+                    before = in(reg) ymmregs_before.as_ptr(),
+                    after = in(reg) ymmregs_after.as_mut_ptr(),
+                    out("xmm0") _, out("xmm1") _, out("xmm2") _, out("xmm3") _,
+                    out("xmm4") _, out("xmm5") _, out("xmm6") _, out("xmm7") _,
+                    out("xmm8") _, out("xmm9") _, out("xmm10") _, out("xmm11") _,
+                    out("xmm12") _, out("xmm13") _, out("xmm14") _, out("xmm15") _,
+                );
+                for i in 0..16 {
+                    let bef: [u8; 32] = core::mem::transmute(ymmregs_before[i]);
+                    let aft: [u8; 32] = core::mem::transmute(ymmregs_after[i]);
+                    assert_eq!(bef, aft);
+                }
+                // TODO: check x87, mxcsr?
+                println!("All affected registers were preserved.");
+            }
+        }
+        ForkResult::Parent { child } => {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            unsafe {
+                let sv = libc::sigval {
+                    sival_ptr: core::ptr::null_mut(),
+                };
+                // this ensures it stays below the minimum POSIX length of the queue
+                for _ in 0..30 {
+                    if libc::sigqueue(child.as_raw(), ARB_RTSIG, sv) != 0 {
+                        eprintln!("failed: {}", std::io::Error::last_os_error());
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+            assert_eq!(
+                wait::waitpid(child, None).unwrap(),
+                WaitStatus::Exited(child, 0),
+            );
+        }
+    }
+}
+
 // TODO: look at "probably hang from here", the print above it are printed, after that the test stuck
 //          so probably cargo is holding something that making it stuck
 pub fn run_with_timeout(test_fn: fn()) {

@@ -132,6 +132,9 @@ fn main() {
     tests.insert("waitpid_eintr", proc::waitpid_eintr);
     tests.insert("raise_correct_sig_group", proc::raise_correct_sig_group);
     tests.insert("sigkill_fail_code", proc::sigkill_fail_code);
+    tests.insert("rtsig_avx_preservation", || unsafe {
+        proc::rtsig_avx_preservation()
+    });
 
     // TODO: unpack these UDS tests
     tests.insert("uds_dgram", uds::dgram_tests::run_all);
