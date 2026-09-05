@@ -929,9 +929,13 @@ pub fn rtsig_avx_preservation() {
     // TODO: this shouldn't be done, but Redox's libc crate is limited...
     const ARB_RTSIG: libc::c_int = 40;
 
+    static CALLED: AtomicBool = AtomicBool::new(false);
+
     unsafe {
         // TODO: ucontext_t
-        unsafe fn empty_action(_: libc::c_int, _: *const libc::siginfo_t, _: *const ()) {}
+        unsafe fn empty_action(_: libc::c_int, _: *const libc::siginfo_t, _: *const ()) {
+            CALLED.store(true, Ordering::SeqCst);
+        }
         let act = libc::sigaction {
             sa_flags: libc::SA_SIGINFO,
             sa_restorer: None,
@@ -944,7 +948,19 @@ pub fn rtsig_avx_preservation() {
     match unsafe { unistd::fork().unwrap() } {
         ForkResult::Child => {
             const NUM_REPETITIONS: usize = 1 << 28;
+            extern "C" {
+                fn __relibc___redox_rt_debug_clear_tmp_disable_signals();
+                fn __relibc___redox_rt_debug_print_tmp_disable_signals_info();
+            }
             unsafe {
+                // TODO: fix https://gitlab.redox-os.org/redox-os/relibc/-/work_items/306, allowing
+                // these to be removed
+                println!("[DEBUG START]");
+                __relibc___redox_rt_debug_print_tmp_disable_signals_info();
+                __relibc___redox_rt_debug_clear_tmp_disable_signals();
+                __relibc___redox_rt_debug_print_tmp_disable_signals_info();
+                println!("[DEBUG END]");
+
                 use std::arch::x86_64::{__m256i, _mm256_set1_epi8};
 
                 let ymmregs_before: [__m256i; 16] =
@@ -952,55 +968,56 @@ pub fn rtsig_avx_preservation() {
                 let mut ymmregs_after: [__m256i; 16] = unsafe { core::mem::zeroed() };
 
                 core::arch::asm!("
-                    vmovdqa ymm0,  [{before}+0x000]
-                    vmovdqa ymm1,  [{before}+0x020]
-                    vmovdqa ymm2,  [{before}+0x040]
-                    vmovdqa ymm3,  [{before}+0x060]
-                    vmovdqa ymm4,  [{before}+0x080]
-                    vmovdqa ymm5,  [{before}+0x0A0]
-                    vmovdqa ymm6,  [{before}+0x0C0]
-                    vmovdqa ymm7,  [{before}+0x0E0]
-                    vmovdqa ymm8,  [{before}+0x100]
-                    vmovdqa ymm9,  [{before}+0x120]
-                    vmovdqa ymm10, [{before}+0x140]
-                    vmovdqa ymm11, [{before}+0x160]
-                    vmovdqa ymm12, [{before}+0x180]
-                    vmovdqa ymm13, [{before}+0x1A0]
-                    vmovdqa ymm14, [{before}+0x1C0]
-                    vmovdqa ymm15, [{before}+0x1E0]
+                    vmovdqu ymm0,  [rsi+0x000]
+                    vmovdqu ymm1,  [rsi+0x020]
+                    vmovdqu ymm2,  [rsi+0x040]
+                    vmovdqu ymm3,  [rsi+0x060]
+                    vmovdqu ymm4,  [rsi+0x080]
+                    vmovdqu ymm5,  [rsi+0x0A0]
+                    vmovdqu ymm6,  [rsi+0x0C0]
+                    vmovdqu ymm7,  [rsi+0x0E0]
+                    vmovdqu ymm8,  [rsi+0x100]
+                    vmovdqu ymm9,  [rsi+0x120]
+                    vmovdqu ymm10, [rsi+0x140]
+                    vmovdqu ymm11, [rsi+0x160]
+                    vmovdqu ymm12, [rsi+0x180]
+                    vmovdqu ymm13, [rsi+0x1A0]
+                    vmovdqu ymm14, [rsi+0x1C0]
+                    vmovdqu ymm15, [rsi+0x1E0]
 
-                    mov rax, {num_repetitions}
+                    mov rcx, {num_repetitions}
                     .p2align 4
 2:
                     pause
-                    sub rax, 1
+                    sub rcx, 1
                     jnz 2b
 
-                    vmovdqa [{after}+0x000], ymm0  
-                    vmovdqa [{after}+0x020], ymm1  
-                    vmovdqa [{after}+0x040], ymm2  
-                    vmovdqa [{after}+0x060], ymm3  
-                    vmovdqa [{after}+0x080], ymm4  
-                    vmovdqa [{after}+0x0A0], ymm5  
-                    vmovdqa [{after}+0x0C0], ymm6  
-                    vmovdqa [{after}+0x0E0], ymm7  
-                    vmovdqa [{after}+0x100], ymm8  
-                    vmovdqa [{after}+0x120], ymm9  
-                    vmovdqa [{after}+0x140], ymm10 
-                    vmovdqa [{after}+0x160], ymm11 
-                    vmovdqa [{after}+0x180], ymm12 
-                    vmovdqa [{after}+0x1A0], ymm13 
-                    vmovdqa [{after}+0x1C0], ymm14 
-                    vmovdqa [{after}+0x1E0], ymm15 
+                    vmovdqu [rdi+0x000], ymm0
+                    vmovdqu [rdi+0x020], ymm1
+                    vmovdqu [rdi+0x040], ymm2
+                    vmovdqu [rdi+0x060], ymm3
+                    vmovdqu [rdi+0x080], ymm4
+                    vmovdqu [rdi+0x0A0], ymm5
+                    vmovdqu [rdi+0x0C0], ymm6
+                    vmovdqu [rdi+0x0E0], ymm7
+                    vmovdqu [rdi+0x100], ymm8
+                    vmovdqu [rdi+0x120], ymm9
+                    vmovdqu [rdi+0x140], ymm10
+                    vmovdqu [rdi+0x160], ymm11
+                    vmovdqu [rdi+0x180], ymm12
+                    vmovdqu [rdi+0x1A0], ymm13
+                    vmovdqu [rdi+0x1C0], ymm14
+                    vmovdqu [rdi+0x1E0], ymm15
                 ",
                     num_repetitions = const(NUM_REPETITIONS),
-                    before = in(reg) ymmregs_before.as_ptr(),
-                    after = in(reg) ymmregs_after.as_mut_ptr(),
+                    in("rsi") ymmregs_before.as_ptr(),
+                    in("rdi") ymmregs_after.as_mut_ptr(),
                     out("xmm0") _, out("xmm1") _, out("xmm2") _, out("xmm3") _,
                     out("xmm4") _, out("xmm5") _, out("xmm6") _, out("xmm7") _,
                     out("xmm8") _, out("xmm9") _, out("xmm10") _, out("xmm11") _,
                     out("xmm12") _, out("xmm13") _, out("xmm14") _, out("xmm15") _,
                 );
+                assert!(CALLED.load(Ordering::Relaxed));
                 for i in 0..16 {
                     let bef: [u8; 32] = core::mem::transmute(ymmregs_before[i]);
                     let aft: [u8; 32] = core::mem::transmute(ymmregs_after[i]);
