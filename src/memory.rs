@@ -4,13 +4,15 @@ use std::{
     io::{Read, Write},
     os::fd::{AsRawFd, FromRawFd, IntoRawFd, RawFd},
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         Barrier,
     },
     thread,
     time::Instant,
 };
 
+use nix::sys::wait::WaitStatus;
+use rand::{RngExt, SeedableRng};
 use syscall::{Map, MapFlags, PAGE_SIZE};
 
 pub fn clone_grant_using_fmap() {
@@ -578,4 +580,140 @@ pub fn pgtbl_populate_bench(results: &mut crate::BenchResults) {
         "pgtbl_populate_bench.ticks_per_page",
         (ticks as f64 / (LENGTH / PAGE_SIZE) as f64) / REPETITIONS as f64,
     );
+}
+
+/// Creates exponentially many child processes with a large amount of continuously modified CoW
+/// memory.
+// TODO: Create subtests with certain defaults. For example, a high fraction of reads and a very
+// large buffer will test TLB miss overhead, whereas a high fraction of writes and smaller buffer
+// will in addition to TLB misses, also test memory allocation, mapping, etc.
+pub fn heavy_forking(results: &mut crate::BenchResults) {
+    // 2^n processes will be created
+
+    let param_exponent = std::env::var("ACID_FORK_EXPONENT")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(10);
+    let param_bufsize = std::env::var("ACID_FORK_BUFSIZE")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(1024 * 1024);
+    let param_read_prob = std::env::var("ACID_FORK_P_READ")
+        .ok()
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    let param_write_prob = std::env::var("ACID_FORK_P_WRITE")
+        .ok()
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(1.0);
+    let param_iterations = std::env::var("ACID_FORK_ITERATIONS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(2000);
+    let mut rng = match std::env::var("ACID_FORK_SEED")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+    {
+        Some(seed) => rand::rngs::SmallRng::seed_from_u64(seed),
+        None => rand::make_rng(),
+    };
+    let total_processes = 1_usize.checked_shl(param_exponent).unwrap();
+
+    #[repr(C)]
+    struct Stats {
+        total_fork_ticks: AtomicU64,
+        total_mem_ticks: AtomicU64,
+        total_bytes_accessed: AtomicU64,
+    }
+
+    let stats_region = unsafe {
+        &*libredox::call::mmap(libredox::call::MmapArgs {
+            addr: core::ptr::null_mut(),
+            length: syscall::PAGE_SIZE,
+            prot: libredox::flag::PROT_READ | libredox::flag::PROT_WRITE,
+            flags: libredox::flag::MAP_SHARED,
+            fd: !0,
+            offset: 0,
+        })
+        .unwrap()
+        .cast::<Stats>()
+    };
+
+    let mut mem = vec![0_u8; param_bufsize];
+    let mut children = Vec::with_capacity(param_exponent as usize);
+
+    let mut ts = results.rdtsc();
+
+    for _ in 0..param_exponent {
+        let result = unsafe { nix::unistd::fork().expect("failed to fork") };
+
+        let t = results.rdtsc();
+        let fork_overhead = t - ts;
+        ts = t;
+
+        if result.is_child() {
+            // ensure different fork branches do not have identical RNG outcomes
+            let _ = rng.random_bool(0.5);
+        }
+
+        children.push(result);
+
+        let mut bytes_accessed = 0_u64;
+
+        for _ in 0..param_iterations {
+            if rng.random_bool(param_read_prob) {
+                bytes_accessed += 1;
+                let offset = rng.random_range(0..mem.len());
+                unsafe {
+                    mem.as_ptr().add(offset).read_volatile();
+                }
+            }
+            if rng.random_bool(param_write_prob) {
+                bytes_accessed += 1;
+                let offset = rng.random_range(0..mem.len());
+                let byte = rng.random();
+                unsafe {
+                    mem.as_mut_ptr().add(offset).write_volatile(byte);
+                }
+            }
+        }
+        let t = results.rdtsc();
+        let mem_overhead = t - ts;
+        ts = t;
+
+        stats_region
+            .total_fork_ticks
+            .fetch_add(fork_overhead, Ordering::Relaxed);
+        stats_region
+            .total_mem_ticks
+            .fetch_add(mem_overhead, Ordering::Relaxed);
+        stats_region
+            .total_bytes_accessed
+            .fetch_add(bytes_accessed, Ordering::Relaxed);
+    }
+
+    for result in children.into_iter().rev() {
+        match result {
+            nix::unistd::ForkResult::Child => {
+                std::process::exit(0);
+            }
+            nix::unistd::ForkResult::Parent { child } => {
+                let status = nix::sys::wait::waitpid(child, None).expect("failed to await child");
+                assert_eq!(status, WaitStatus::Exited(child, 0));
+            }
+        }
+    }
+
+    // Only the original parent process will have survived here.
+    let total_fork_ticks = stats_region.total_fork_ticks.load(Ordering::Relaxed);
+    let total_mem_ticks = stats_region.total_mem_ticks.load(Ordering::Relaxed);
+    let total_bytes_accessed = stats_region.total_bytes_accessed.load(Ordering::Relaxed);
+
+    eprintln!("total fork ticks {total_fork_ticks}; mem ticks {total_mem_ticks}; bytes accessed {total_bytes_accessed}");
+
+    let ticks_per_fork = total_fork_ticks as f64 / total_processes as f64;
+    let ticks_per_byte = total_mem_ticks as f64 / total_bytes_accessed as f64;
+
+    results.add_metric("heavy_forking.ticks_per_fork", ticks_per_fork);
+    results.add_metric("heavy_forking.ticks_per_byte", ticks_per_byte);
 }
