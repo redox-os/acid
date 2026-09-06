@@ -4,6 +4,8 @@ mod sys_call;
 
 use std::cell::Cell;
 
+use anyhow::{Context, Result};
+
 pub use avx::*;
 pub use redoxfs::*;
 pub use sys_call::*;
@@ -30,6 +32,17 @@ pub struct PerfCtrState {
     model: u8,
 }
 
+#[repr(u8)]
+#[derive(Clone, Copy, Debug)]
+pub enum CountWhere {
+    DontCount = 0b00,
+    InUserspace = 0b01,
+    InKernel = 0b10,
+    Everywhere = 0b11,
+}
+
+// TODO: saner macro allowing structs to be initialized naturally and declared with e.g. Verilog
+// notation (which AMD itself appears to be using in its docs).
 bitfield::bitfield! {
     struct PerfEvtSel(u64);
     event_select_lo, set_event_select_lo: 7, 0;
@@ -53,6 +66,41 @@ bitfield::bitfield! {
     extended_family, set_extended_family: 27, 20;
     family, set_family: 11, 8;
 }
+
+#[derive(Clone, Copy, Debug)]
+pub enum PerfCtrEvent {
+    /// Core::X86::Pmc::Core::LsMisalLoads
+    CoreLsMisalLoads {
+        /// MA64
+        cache_crossing: bool,
+        /// MA4K
+        page_crossing: bool,
+    },
+}
+impl PerfCtrEvent {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::CoreLsMisalLoads { .. } => "Core::X86::Pmc::Core::LsMisalLoads",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct LookupFailed {
+    name: &'static str,
+    model: u8,
+    family: u8,
+}
+impl std::fmt::Display for LookupFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Failed to lookup perf counter {} for model {:x}h family {:x}h",
+            self.name, self.model, self.family
+        )
+    }
+}
+impl std::error::Error for LookupFailed {}
 
 impl PerfCtrState {
     pub fn new() -> Option<Self> {
@@ -84,44 +132,53 @@ impl PerfCtrState {
         // TODO: Intel
         0xc001_0000 | u32::from(idx)
     }
-    fn lookup_ctr(&self, name: &'static str, unit_mask: u8) -> Option<u16> {
+    fn lookup_ctr(&self, event: PerfCtrEvent) -> Result<(u16, u8), LookupFailed> {
         // TODO: this list is heavily model-dependent and if complete would be potentially very
         // long.
-        match (name, self.family, self.model) {
+        match (event, self.family, self.model) {
             // CI is currently family 17h model 1h rev 2h, which does not appear to support this specific counter
             // My 19h-21h-0h CPU does.
-            ("Core::X86::Pmc::Core::LsMisalLoads", 0x19, _) => {
-                assert_eq!(unit_mask & 0b11, unit_mask);
-                Some(0x047)
-            }
-            _ => None,
+            (
+                PerfCtrEvent::CoreLsMisalLoads {
+                    page_crossing,
+                    cache_crossing,
+                },
+                0x19,
+                _,
+            ) => Ok((
+                0x047,
+                u8::from(cache_crossing) | (u8::from(page_crossing) << 1),
+            )),
+            _ => Err(LookupFailed {
+                name: event.name(),
+                model: self.model,
+                family: self.family,
+            }),
         }
     }
-    pub fn add_perf_ctr(&self, name: &'static str, unit_mask: u8) -> Option<Idx<'_>> {
-        let event = match self.lookup_ctr(name, unit_mask) {
-            Some(t) => t,
-            None => {
-                eprintln!(
-                    "Failed to lookup perf counter {name} for model {:x}h family {:x}h",
-                    self.model, self.family
-                );
-                return None;
-            }
-        };
+    pub fn add_perf_ctr(&self, event: PerfCtrEvent, count_where: CountWhere) -> Result<Idx<'_>> {
+        let name = event.name();
+
+        let (event, unit_mask) = self.lookup_ctr(event)?;
         assert!(event < 4096);
         let ctr = Ctr {
             name,
             event,
             unit_mask,
         };
-        let free = self.counters.iter().position(|c| c.get().is_none())?;
+        let free = self
+            .counters
+            .iter()
+            .position(|c| c.get().is_none())
+            .context("have used up all available perf counters")?;
 
         {
             let mut value = PerfEvtSel(0);
+            let count_where_value = count_where as u8;
             value.set_event_select_hi(u64::from(event >> 8));
             value.set_event_select_lo(u64::from(event & 0xff));
-            value.set_os(false);
-            value.set_usr(true);
+            value.set_usr(count_where_value & 1 != 0);
+            value.set_os((count_where_value >> 1) != 0);
             value.set_unit_mask(unit_mask.into());
             value.set_en(true);
 
@@ -130,7 +187,7 @@ impl PerfCtrState {
         }
         self.counters[free].set(Some(ctr));
 
-        Some(Idx {
+        Ok(Idx {
             idx: free as u8,
             ctrs: self,
         })
@@ -195,8 +252,15 @@ impl<'perf> Drop for Idx<'perf> {
 
 pub fn perf_ctr_meta_test(results: &mut crate::BenchResults) {
     let perf_ctrs = results.perf_ctrs.unwrap();
+
     let mut perf_ctr = perf_ctrs
-        .add_perf_ctr("Core::X86::Pmc::Core::LsMisalLoads", 0b11)
+        .add_perf_ctr(
+            PerfCtrEvent::CoreLsMisalLoads {
+                cache_crossing: true,
+                page_crossing: true,
+            },
+            CountWhere::InUserspace,
+        )
         .unwrap();
 
     // TODO: Currently the test is meant to run manually. Maybe expand it to check with all
@@ -209,6 +273,10 @@ pub fn perf_ctr_meta_test(results: &mut crate::BenchResults) {
     let page_aligned = page_misaligned.map_addr(|a| a + 1).cast::<u64>();
     // just cacheline-crossing
     let cache_misaligned = page_aligned.map_addr(|a| a + 63).cast::<u64>();
+
+    eprintln!("Page-aligned:     {page_aligned:p}");
+    eprintln!("Cache-misaligned: {cache_misaligned:p}");
+    eprintln!("Page-misaligned:  {page_misaligned:p}");
 
     // misaligned loads
     let c1 = perf_ctr.rdpmc();
@@ -225,8 +293,8 @@ pub fn perf_ctr_meta_test(results: &mut crate::BenchResults) {
     drop(perf_ctr);
 
     let ctr = c2 - c1;
-    println!("COUNTERS: {c2} - {c1} = {ctr}");
-    println!(
+    eprintln!("COUNTERS: {c2} - {c1} = {ctr}");
+    eprintln!(
         "{:.3} page-unaligned loads per iteration",
         ctr as f64 / f64::from(n)
     );
