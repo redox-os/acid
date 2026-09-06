@@ -4,7 +4,7 @@ mod sys_call;
 
 use std::cell::Cell;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 
 pub use avx::*;
 pub use redoxfs::*;
@@ -67,40 +67,55 @@ bitfield::bitfield! {
     family, set_family: 11, 8;
 }
 
+bitflags::bitflags! {
+    /// Number of times there's an L1 DTLB miss, filterable by page sizes and whether it was still
+    /// a hit in the L2 TLB.
+    ///
+    /// Checked to exist for both (some) 17h and 19h, although the meaning of "coalesced" may
+    /// differ.
+    #[derive(Clone, Copy, Debug)]
+    pub struct CoreLsL1DTlbMiss: u8 {
+        const TLB_RELOAD_1G_L2_MISS = 1 << 7;
+        const TLB_RELOAD_2M_L2_MISS = 1 << 6;
+        const TLB_RELOAD_COALESCED_PAGE_MISS = 1 << 5;
+        const TLB_RELOAD_4K_L2_MISS = 1 << 4;
+
+        const TLB_RELOAD_1G_L2_HIT = 1 << 3;
+        const TLB_RELOAD_2M_L2_HIT = 1 << 2;
+        const TLB_RELOAD_COALESCED_PAGE_HIT = 1 << 1;
+        const TLB_RELOAD_4K_L2_HIT = 1 << 0;
+    }
+    /// Number of misaligned loads, filterable by those that cross cache lines and those that cross
+    /// pages.
+    ///
+    /// Checked to exist on 19h.
+    #[derive(Clone, Copy, Debug)]
+    pub struct CoreLsMisalLoads: u8 {
+        const MA4K = 1 << 1;
+        const MA64 = 1 << 0;
+    }
+}
+
+// TODO: I could be wrong, but it looks like if a perf ctr in mentioned in an AMD Processor
+// Programming Reference pdf, and all bits are marked "Reserved" , then the counter is still
+// supported by the processor, merely that it cannot distinguish between sub-events of that
+// counter.
 #[derive(Clone, Copy, Debug)]
 pub enum PerfCtrEvent {
     /// Core::X86::Pmc::Core::LsMisalLoads
-    CoreLsMisalLoads {
-        /// MA64
-        cache_crossing: bool,
-        /// MA4K
-        page_crossing: bool,
-    },
+    CoreLsMisalLoads(CoreLsMisalLoads),
+    CoreLsL1DtlbMiss(CoreLsL1DTlbMiss),
+    CoreLsNotHaltedCyc,
 }
 impl PerfCtrEvent {
     pub fn name(&self) -> &'static str {
         match self {
-            Self::CoreLsMisalLoads { .. } => "Core::X86::Pmc::Core::LsMisalLoads",
+            Self::CoreLsL1DtlbMiss(_) => "Core::X86::Pmc::Core::LsL1DTlbMiss",
+            Self::CoreLsMisalLoads(_) => "Core::X86::Pmc::Core::LsMisalLoads",
+            Self::CoreLsNotHaltedCyc => "Core::X86::Pmc::Core::LsNotHaltedCyc",
         }
     }
 }
-
-#[derive(Clone, Copy, Debug)]
-pub struct LookupFailed {
-    name: &'static str,
-    model: u8,
-    family: u8,
-}
-impl std::fmt::Display for LookupFailed {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Failed to lookup perf counter {} for model {:x}h family {:x}h",
-            self.name, self.model, self.family
-        )
-    }
-}
-impl std::error::Error for LookupFailed {}
 
 impl PerfCtrState {
     pub fn new() -> Option<Self> {
@@ -132,28 +147,26 @@ impl PerfCtrState {
         // TODO: Intel
         0xc001_0000 | u32::from(idx)
     }
-    fn lookup_ctr(&self, event: PerfCtrEvent) -> Result<(u16, u8), LookupFailed> {
+    fn lookup_ctr(&self, event: PerfCtrEvent) -> Result<(u16, u8)> {
         // TODO: this list is heavily model-dependent and if complete would be potentially very
         // long.
         match (event, self.family, self.model) {
-            // CI is currently family 17h model 1h rev 2h, which does not appear to support this specific counter
-            // My 19h-21h-0h CPU does.
-            (
-                PerfCtrEvent::CoreLsMisalLoads {
-                    page_crossing,
-                    cache_crossing,
-                },
-                0x19,
-                _,
-            ) => Ok((
-                0x047,
-                u8::from(cache_crossing) | (u8::from(page_crossing) << 1),
+            (PerfCtrEvent::CoreLsMisalLoads(bits), 0x17, _) => {
+                if !bits.is_empty() {
+                    bail!("17h does not support individual misaligned-loads fields");
+                }
+                Ok((0x047, 0))
+            }
+            (PerfCtrEvent::CoreLsMisalLoads(bits), 0x19, _) => Ok((0x047, bits.bits())),
+            (PerfCtrEvent::CoreLsL1DtlbMiss(bits), 0x17 | 0x19, _) => Ok((0x045, bits.bits())),
+            (PerfCtrEvent::CoreLsNotHaltedCyc, 0x17 | 0x19, _) => Ok((0x076, 0)),
+
+            _ => Err(anyhow!(
+                "Failed to lookup perf counter {} for model {:x}h family {:x}h",
+                event.name(),
+                self.model,
+                self.family
             )),
-            _ => Err(LookupFailed {
-                name: event.name(),
-                model: self.model,
-                family: self.family,
-            }),
         }
     }
     pub fn add_perf_ctr(&self, event: PerfCtrEvent, count_where: CountWhere) -> Result<Idx<'_>> {
@@ -255,12 +268,12 @@ pub fn perf_ctr_meta_test(results: &mut crate::BenchResults) {
 
     let mut perf_ctr = perf_ctrs
         .add_perf_ctr(
-            PerfCtrEvent::CoreLsMisalLoads {
-                cache_crossing: true,
-                page_crossing: true,
-            },
+            PerfCtrEvent::CoreLsMisalLoads(CoreLsMisalLoads::all()),
             CountWhere::InUserspace,
         )
+        .unwrap();
+    let mut not_halted_cyc = perf_ctrs
+        .add_perf_ctr(PerfCtrEvent::CoreLsNotHaltedCyc, CountWhere::InUserspace)
         .unwrap();
 
     // TODO: Currently the test is meant to run manually. Maybe expand it to check with all
@@ -280,6 +293,8 @@ pub fn perf_ctr_meta_test(results: &mut crate::BenchResults) {
 
     // misaligned loads
     let c1 = perf_ctr.rdpmc();
+    let d1 = not_halted_cyc.rdpmc();
+    let t1 = results.rdtsc();
 
     let n = 100000000_u32;
 
@@ -290,10 +305,17 @@ pub fn perf_ctr_meta_test(results: &mut crate::BenchResults) {
     }
 
     let c2 = perf_ctr.rdpmc();
+    let d2 = not_halted_cyc.rdpmc();
+    let t2 = results.rdtsc();
     drop(perf_ctr);
+    drop(not_halted_cyc);
 
     let ctr = c2 - c1;
-    eprintln!("COUNTERS: {c2} - {c1} = {ctr}");
+    let dtr = d2 - d1;
+    let ttr = t2 - t1;
+    eprintln!("MISAL. COUNTERS: {c2} - {c1} = {ctr}");
+    eprintln!("CYC.   COUNTERS: {d2} - {d1} = {dtr}");
+    eprintln!("TSC    COUNTERS: {t2} - {t1} = {ttr}");
     eprintln!(
         "{:.3} page-unaligned loads per iteration",
         ctr as f64 / f64::from(n)
