@@ -588,6 +588,42 @@ pub fn pgtbl_populate_bench(results: &mut crate::BenchResults) {
 // large buffer will test TLB miss overhead, whereas a high fraction of writes and smaller buffer
 // will in addition to TLB misses, also test memory allocation, mapping, etc.
 pub fn heavy_forking(results: &mut crate::BenchResults) {
+    // TODO: count these during fork vs during memory access and update like the other stats!
+    #[cfg(target_arch = "x86_64")]
+    let mut perf_ctrs = results.perf_ctrs.as_ref().and_then(|ctrs| {
+        use crate::arch::{CoreLsL1DTlbMiss, CountWhere, PerfCtrEvent};
+
+        let hits = CoreLsL1DTlbMiss::TLB_RELOAD_4K_L2_HIT
+            | CoreLsL1DTlbMiss::TLB_RELOAD_COALESCED_PAGE_HIT
+            | CoreLsL1DTlbMiss::TLB_RELOAD_2M_L2_HIT
+            | CoreLsL1DTlbMiss::TLB_RELOAD_1G_L2_HIT;
+        let misses = CoreLsL1DTlbMiss::TLB_RELOAD_4K_L2_MISS
+            | CoreLsL1DTlbMiss::TLB_RELOAD_COALESCED_PAGE_MISS
+            | CoreLsL1DTlbMiss::TLB_RELOAD_2M_L2_MISS
+            | CoreLsL1DTlbMiss::TLB_RELOAD_1G_L2_MISS;
+
+        Some([
+            ctrs.add_perf_ctr(
+                PerfCtrEvent::CoreLsL1DtlbMiss(hits),
+                CountWhere::InUserspace,
+            )
+            .ok()?,
+            ctrs.add_perf_ctr(
+                PerfCtrEvent::CoreLsL1DtlbMiss(misses),
+                CountWhere::InUserspace,
+            )
+            .ok()?,
+            ctrs.add_perf_ctr(PerfCtrEvent::CoreLsL1DtlbMiss(hits), CountWhere::InKernel)
+                .ok()?,
+            ctrs.add_perf_ctr(PerfCtrEvent::CoreLsL1DtlbMiss(misses), CountWhere::InKernel)
+                .ok()?,
+        ])
+    });
+    #[cfg(target_arch = "x86_64")]
+    let initial_ctr_vals = perf_ctrs
+        .as_mut()
+        .map(|ctrs| ctrs.iter_mut().map(|c| c.rdpmc()).collect::<Vec<_>>());
+
     // 2^n processes will be created
 
     let param_exponent = std::env::var("ACID_FORK_EXPONENT")
@@ -720,4 +756,30 @@ pub fn heavy_forking(results: &mut crate::BenchResults) {
 
     results.add_metric("heavy_forking.ticks_per_fork", ticks_per_fork);
     results.add_metric("heavy_forking.ticks_per_byte", ticks_per_byte);
+
+    #[cfg(target_arch = "x86_64")]
+    if let (Some(mut ctrs), Some(initial)) = (perf_ctrs, initial_ctr_vals) {
+        let final_ctr_vals = ctrs.iter_mut().map(|c| c.rdpmc()).collect::<Vec<_>>();
+        drop(ctrs);
+
+        let user_hits = final_ctr_vals[0] - initial[0];
+        let user_misses = final_ctr_vals[1] - initial[1];
+        let user_total = user_hits + user_misses;
+        let kernel_hits = final_ctr_vals[2] - initial[2];
+        let kernel_misses = final_ctr_vals[3] - initial[3];
+        let kernel_total = kernel_hits + kernel_misses;
+
+        results.add_metric(
+            "heavy_forking.l1dtlb_user_l2_hit_rate",
+            user_hits as f64 / user_total as f64,
+        );
+        results.add_metric(
+            "heavy_forking.l1dtlb_kernel_l2_hit_rate",
+            kernel_hits as f64 / kernel_total as f64,
+        );
+        results.add_metric(
+            "heavy_forking.l1dtlb_user_vs_kernel_misses",
+            user_total as f64 / kernel_total as f64,
+        );
+    }
 }
