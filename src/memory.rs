@@ -681,9 +681,13 @@ pub fn heavy_forking(results: &mut crate::BenchResults) {
         let mem_overhead = t - ts;
         ts = t;
 
-        stats_region
-            .total_fork_ticks
-            .fetch_add(fork_overhead, Ordering::Relaxed);
+        // Every fork takes N ticks and creates a parent and a child. Of course, it would be wrong
+        // to increment the total fork ticks by 2N.
+        if !result.is_child() {
+            stats_region
+                .total_fork_ticks
+                .fetch_add(fork_overhead, Ordering::Relaxed);
+        }
         stats_region
             .total_mem_ticks
             .fetch_add(mem_overhead, Ordering::Relaxed);
