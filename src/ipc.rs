@@ -21,7 +21,10 @@ pub fn ipc_latency_bench<const USE_SIMULTANEOUS: bool>(results: &mut BenchResult
         )
     };
 
-    let n = 1 << 20;
+    let n = std::env::var("ACID_IPC_ITERATIONS")
+        .ok()
+        .and_then(|i| i.parse::<u64>().ok())
+        .unwrap_or(1 << 20);
 
     match unsafe { nix::unistd::fork().unwrap() } {
         ForkResult::Child => {
