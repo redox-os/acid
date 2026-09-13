@@ -778,8 +778,12 @@ pub fn heavy_forking(results: &mut crate::BenchResults) {
             kernel_hits as f64 / kernel_total as f64,
         );
         results.add_metric(
-            "heavy_forking.l1dtlb_user_vs_kernel_misses",
-            user_total as f64 / kernel_total as f64,
+            "heavy_forking.l1dtlb_user_misses_per_byte",
+            user_total as f64 / total_bytes_accessed as f64,
+        );
+        results.add_metric(
+            "heavy_forking.l1dtlb_kernel_misses_per_byte",
+            kernel_total as f64 / total_bytes_accessed as f64,
         );
     }
 }
