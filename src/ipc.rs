@@ -1,3 +1,6 @@
+use std::fs::File;
+use std::io::prelude::*;
+
 use libredox::Fd;
 use nix::unistd::ForkResult;
 use redox_scheme::scheme::Op;
@@ -98,4 +101,35 @@ pub fn ipc_latency_bench<const USE_SIMULTANEOUS: bool>(results: &mut BenchResult
             }
         }
     }
+}
+
+/// Same as `dd if=/dev/urandom of=/dev/zero bs=$ACID_IPC_BLOCK_SIZE count=$ACID_IPC_NUM_BLOCKS`,
+/// except more suitable for benchmarking.
+pub fn simple_file_io_bench(results: &mut BenchResults) {
+    let count = std::env::var("ACID_IPC_NUM_BLOCKS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(128 * 1024);
+    let bs = std::env::var("ACID_IPC_BLOCK_SIZE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(4096);
+
+    let mut input = File::open("/dev/urandom").unwrap();
+    let mut output = File::open("/dev/zero").unwrap();
+
+    // TODO: allow specifying alignment?
+    let mut buf = vec![0; bs];
+
+    let t1 = results.rdtsc();
+    for _ in 0..count {
+        input.read_exact(&mut buf).unwrap();
+        output.write_all(&buf).unwrap();
+    }
+    let t2 = results.rdtsc();
+    // TODO: track ticks spent in read vs in write?
+    results.add_metric(
+        "simple_file_io_bench.ticks_per_iter",
+        (t2 - t1) as f64 / count as f64,
+    );
 }

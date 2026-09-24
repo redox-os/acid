@@ -144,6 +144,7 @@ fn main() {
     tests.insert("fdtbl", fdtbl::run_all);
 
     benches.insert("getppid_bench", proc::getppid_bench);
+    benches.insert("simple_file_io_bench", ipc::simple_file_io_bench);
     benches.insert("ipc_latency", ipc::ipc_latency_bench::<false>);
     benches.insert("ipc_latency_single", ipc::ipc_latency_bench::<false>);
     benches.insert("ipc_latency_simultaneous", ipc::ipc_latency_bench::<true>);
